@@ -49,6 +49,7 @@ import AggregateFlowView from '../components/dashboard/AggregateFlowView'
 import ActionPointsList from '../components/dashboard/ActionPointsList'
 import HeatmapCarousel from '../components/dashboard/HeatmapCarousel'
 import ComparePanel from '../components/dashboard/ComparePanel'
+import SankeyInsightsPanel from '../components/dashboard/SankeyInsightsPanel'
 import {
   getStepsFromSessionEvents,
   getTaskJourneysFromSessionEvents,
@@ -830,28 +831,39 @@ useEffect(() => {
         )}
 
         {activeView === 'flow_sankey' && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            {agentJourneySteps.length === 0 && humanJourneySteps.length === 0 ? (
-              <div style={{
-                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                flexDirection: 'column', gap: 12, background: 'var(--bg)',
-              }}>
-                <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  No flow data yet
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+            {/* ── Sankey diagram (left) ── */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+              {agentJourneySteps.length === 0 && humanJourneySteps.length === 0 ? (
+                <div style={{
+                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexDirection: 'column', gap: 12, background: 'var(--bg)',
+                }}>
+                  <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    No flow data yet
+                  </div>
+                  <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', maxWidth: 340, textAlign: 'center', lineHeight: 1.6 }}>
+                    Run an agent or record a human session to see the flow diagram.
+                  </div>
                 </div>
-                <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', maxWidth: 340, textAlign: 'center', lineHeight: 1.6 }}>
-                  Run an agent or record a human session to see the flow diagram.
-                </div>
-              </div>
-            ) : (
-              <SankeyDiagram
-                agentJourneys={agentJourneySteps}
-                humanJourneys={humanJourneySteps}
-                agentLabels={agentJourneys.map((_, i) => `AI Run #${i + 1}`)}
-                humanLabels={humanJourneyMeta.map(j => j.label)}
-
+              ) : (
+                <SankeyDiagram
+                  agentJourneys={agentJourneySteps}
+                  humanJourneys={humanJourneySteps}
+                  agentLabels={agentJourneys.map((_, i) => `AI Run #${i + 1}`)}
+                  humanLabels={humanJourneyMeta.map(j => j.label)}
+                />
+              )}
+            </div>
+            {/* ── Insights panel (right) ── */}
+            <div style={{ width: 320, flexShrink: 0, borderLeft: '1px solid var(--border)', overflowY: 'auto', background: 'var(--surface)' }}>
+              <SankeyInsightsPanel
+                compareAnalysis={compareAnalysis}
+                compareLoading={compareLoading}
+                agentJourneys={agentJourneys as api.JourneyResponse[]}
+                humanJourneySteps={humanJourneySteps}
               />
-            )}
+            </div>
           </div>
       )}
 
