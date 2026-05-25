@@ -551,6 +551,7 @@ export default function DashboardPage() {
   }, [journeys, siteId, agentFilter])
 
 const agentJourneySteps = useMemo<AgentStep[][]>(() => agentJourneys.map(j => j.steps as AgentStep[]), [agentJourneys])
+const agentLabels = useMemo(() => agentJourneys.map((_, i) => `AI Run #${i + 1}`), [agentJourneys])
 
   const aggFilteredJourneys = useMemo(() =>
     aggregateTaskId !== null ? agentJourneys.filter(j => j.task_id === aggregateTaskId) : agentJourneys,
@@ -624,6 +625,7 @@ useEffect(() => {
     () => humanJourneyMeta.map(j => j.steps),
     [humanJourneyMeta],
   )
+  const humanLabels = useMemo(() => humanJourneyMeta.map(j => j.label), [humanJourneyMeta])
  
 
   const aggregatedScreenshots = useMemo(
@@ -851,8 +853,8 @@ useEffect(() => {
                 <SankeyDiagram
                   agentJourneys={agentJourneySteps}
                   humanJourneys={humanJourneySteps}
-                  agentLabels={agentJourneys.map((_, i) => `AI Run #${i + 1}`)}
-                  humanLabels={humanJourneyMeta.map(j => j.label)}
+                  agentLabels={agentLabels}
+                  humanLabels={humanLabels}
                   onDivergencesChange={setSankeyDivergences}
                 />
               )}
