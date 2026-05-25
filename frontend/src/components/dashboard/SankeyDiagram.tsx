@@ -1,4 +1,5 @@
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import * as d3 from 'd3'
 import { sankey as d3Sankey, sankeyLinkHorizontal } from 'd3-sankey'
 import type { AgentStep } from '../agent/agentTypes'
@@ -1200,7 +1201,7 @@ export default function SankeyDiagram({
             Journey milestones
           </div>
           <div style={{ fontSize: '0.72rem', color: TEXT_MUTED }}>
-            link width = steps spent · hover for detail
+            link width = steps spent · hover for details · click flow to inspect run
           </div>
         </div>
         {/* Compact run filter chips */}
@@ -1297,17 +1298,18 @@ export default function SankeyDiagram({
         )}
       </div>
 
-      {/* Journey detail modal */}
+      {/* Journey detail modal — rendered via portal so it always escapes overflow:hidden parents */}
       {modalJourneyId && (() => {
         const j = journeyMap.get(modalJourneyId)
         if (!j) return null
         const color = colorForJourney(j.kind, j.index)
-        return (
+        return createPortal(
           <JourneyDetailModal
             journey={j}
             color={color}
             onClose={() => setModalJourneyId(null)}
-          />
+          />,
+          document.body,
         )
       })()}
     </div>
