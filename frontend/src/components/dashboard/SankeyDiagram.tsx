@@ -969,6 +969,11 @@ export default function SankeyDiagram({
   useEffect(() => {
     const svg = d3.select(svgRef.current!)
     svg.selectAll('*').remove()
+    // Clear tooltip whenever the SVG rebuilds — elements and their mouseleave
+    // handlers are removed by selectAll('*').remove(), so the tooltip state
+    // would otherwise stay stale.
+    setTooltip(null)
+    setHoverJourneyId(null)
     if (!hasData) return
 
     const containerW = containerRef.current?.clientWidth ?? 860
@@ -1235,7 +1240,11 @@ export default function SankeyDiagram({
       </div>
 
       {/* Body */}
-      <div ref={containerRef} style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
+      <div
+        ref={containerRef}
+        style={{ flex: 1, overflow: 'auto', position: 'relative' }}
+        onMouseLeave={() => { setTooltip(null); setHoverJourneyId(null) }}
+      >
         {hasData ? (
           <svg ref={svgRef} style={{ display: 'block' }} />
         ) : (

@@ -475,11 +475,17 @@ export default function DashboardPage() {
   const activeVersionId = versions[activeVersionIdx !== -1 ? activeVersionIdx : versions.length - 1]?.id ?? latestVersionId
   const versionFrom = activeVersionIdx > 0 ? (versions[activeVersionIdx]?.createdAt ?? null) : null
   const versionTo = versions[activeVersionIdx + 1]?.createdAt ?? null
-  const sessions = allSessions.filter((s: Session) =>
-    (!versionFrom || s.startedAt >= versionFrom) && (!versionTo || s.startedAt < versionTo)
+  const sessions = useMemo(
+    () => allSessions.filter((s: Session) =>
+      (!versionFrom || s.startedAt >= versionFrom) && (!versionTo || s.startedAt < versionTo)
+    ),
+    [allSessions, versionFrom, versionTo],
   )
-  const journeys = allJourneys.filter((j: api.JourneyResponse) =>
-    (!versionFrom || j.completed_at >= versionFrom) && (!versionTo || j.completed_at < versionTo)
+  const journeys = useMemo(
+    () => allJourneys.filter((j: api.JourneyResponse) =>
+      (!versionFrom || j.completed_at >= versionFrom) && (!versionTo || j.completed_at < versionTo)
+    ),
+    [allJourneys, versionFrom, versionTo],
   )
 
   const activeVersionEntry = versions[activeVersionIdx]
