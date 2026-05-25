@@ -737,7 +737,23 @@ function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJou
     ? toItem(point.task.recommendations[point.ppIndex] as ActionPointItem | string)
     : null
   const derivation = derivationSummary(point.task, stats)
-  const diagrams = point.item.diagrams ?? []
+  const rawDiagrams = point.item.diagrams ?? []
+
+  // Auto-add a Horizon Graph chip for agent_gap / human_issue points when the
+  // LLM hasn't already included one — the horizon graph always reveals timing
+  // differences between AI and human journeys for these types.
+  const diagrams: DiagramRef[] = (() => {
+    if (!point.item.type || point.item.type === 'ux_issue') return rawDiagrams
+    if (rawDiagrams.some(d => d.view === 'horizon')) return rawDiagrams
+    const side = point.item.type === 'agent_gap' ? 'ai' : 'human'
+    const autoHorizon: DiagramRef = {
+      view: 'horizon',
+      reason: `Shows when in the journey ${side === 'ai' ? 'AI agents' : 'human users'} are most active and how their timing differs`,
+      highlight: { side },
+      diagram_explanation: `Look at the ${side === 'ai' ? 'AI (teal)' : 'Human (rose)'} journey strips — the highlighted strips show when activity is concentrated across the journey for this action point.`,
+    }
+    return [...rawDiagrams, autoHorizon]
+  })()
 
   const agentThoughts = useMemo(
     () => relevantAgentThoughts(agentJourneys, point.task.task_title, point.item.text),

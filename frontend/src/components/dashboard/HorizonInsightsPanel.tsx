@@ -108,7 +108,12 @@ export default function HorizonInsightsPanel({
       const severity: 'high' | 'medium' = task.difficulty === 'high' ? 'high' : 'medium'
       for (const raw of [...task.pain_points, ...task.recommendations]) {
         const item = raw as ActionPointItem
-        if (!item.diagrams?.some(d => d.view === 'horizon')) continue
+        // Show points that explicitly reference the horizon diagram, OR that
+        // are agent_gap / human_issue — timing differences between AI and human
+        // are always visible in the horizon strip chart.
+        const hasHorizonRef = item.diagrams?.some(d => d.view === 'horizon')
+        const isTimingRelevant = item.type === 'agent_gap' || item.type === 'human_issue'
+        if (!hasHorizonRef && !isTimingRelevant) continue
         pts.push({
           id: `horizon::${task.task_title}::${item.text.slice(0, 40)}`,
           text: item.text,
