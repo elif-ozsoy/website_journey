@@ -1,0 +1,40 @@
+image:
+  repository: postgres
+  tag: 18
+  # cmd: ["your_cmd"]
+  # args: ["an", "array", "of", "values"]
+
+# Port to expose on the pod.
+port: 5432
+
+# Path for health check.
+health: "/"
+
+# Readiness and liveness probe configuration.
+readinessProbe: |
+  tcpSocket:
+    port: {{ .Values.port }}
+  initialDelaySeconds: 10
+  timeoutSeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+
+livenessProbe: |
+  tcpSocket:
+    port: {{ .Values.port }}
+  initialDelaySeconds: 10
+  timeoutSeconds: 5
+  periodSeconds: 10
+  failureThreshold: 5
+  successThreshold: 1
+
+# Define extra environment variables for your application
+extraEnv: {}
+
+pvc:
+  enabled: true
+  accessMode: ReadWriteOnce
+  storage: 4Gi
+  mountPath: "/var/lib/postgresql"
+  storageClassName: longhorn

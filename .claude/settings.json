@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/home/hplytnikas/xaiml/CipherCorgi/backend/.venv/bin/pip show *)",
+      "Bash(/home/hplytnikas/xaiml/CipherCorgi/backend/.venv/bin/python -c \"import sqlalchemy; print\\(sqlalchemy.__version__\\)\")",
+      "Bash(/home/hplytnikas/xaiml/CipherCorgi/backend/.venv/bin/pip list *)",
+      "Bash(/home/hplytnikas/xaiml/CipherCorgi/backend/.venv/bin/pip install *)",
+      "Bash(/home/hplytnikas/xaiml/CipherCorgi/backend/.venv/bin/python -c ' *)",
+      "Bash(xargs cat *)",
+      "Bash(docker compose *)",
+      "Read(//home/hplytnikas/xaiml/**)",
+      "Bash(python3 -)",
+      "Bash(sed -i 's/text-\\\\[8px\\\\]/text-xs/g; s/text-\\\\[9px\\\\]/text-xs/g; s/text-\\\\[10px\\\\]/text-xs/g; s/text-\\\\[11px\\\\]/text-xs/g; s/text-\\\\[12px\\\\]/text-xs/g; s/text-\\\\[13px\\\\]/text-xs/g' components/agent/FlowMap.tsx components/agent/ScreenshotCard.tsx components/agent/StepTimeline.tsx components/agent/StatusBar.tsx)",
+      "Bash(sed -i 's/text-\\\\[15px\\\\]/text-sm/g' components/agent/StepTimeline.tsx)",
+      "Bash(xargs sed -i \"s/fontFamily: 'monospace'/fontFamily: 'var\\(--font-sans\\)'/g\")",
+      "Bash(sed -i 's/fontFamily=\"system-ui,sans-serif\"/fontFamily=\"var\\(--font-sans\\)\"/g' components/agent/FlowMap.tsx)"
+    ]
+  }
+}

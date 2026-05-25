@@ -1,0 +1,36 @@
+# ── Dataset (too large for git — 319MB) ──────────────────────────────────────
+research/data/*.parquet
+
+# ── Generated visualization outputs ──────────────────────────────────────────
+research/visualizations/*.png
+
+# ── ML training artifacts ─────────────────────────────────────────────────────
+microservice/src/sessions/
+microservice/src/checkpoints/
+microservice/src/reports/
+*.pt
+*.npz
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+
+# ── Node ──────────────────────────────────────────────────────────────────────
+node_modules/
+.next/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+frontend/.pnpm-store
+pipeline_data/
+
+.env
+unsloth_compiled_cache/
+frontend/.env.local
+# ── Notebook artifacts ───────────────────────────────────────────────────────
+notebook_artifacts/

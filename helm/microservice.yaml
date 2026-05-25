@@ -1,0 +1,37 @@
+image:
+  repository: null
+  tag: latest
+  # cmd: ["your_cmd"]
+  # args: ["an", "array", "of", "values"]
+
+# Port to expose on the pod.
+port: 8081
+
+# Path for health check.
+health: "/health"
+
+# Readiness and liveness probe configuration.
+readinessProbe: |
+  httpGet:
+    path: {{ .Values.health }}
+    port: {{ .Values.port }}
+  initialDelaySeconds: 10
+  timeoutSeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+
+livenessProbe: |
+  httpGet:
+    path: {{ .Values.health }}
+    port: {{ .Values.port }}
+  initialDelaySeconds: 10
+  timeoutSeconds: 5
+  periodSeconds: 10
+  failureThreshold: 5
+  successThreshold: 1
+
+# Define extra environment variables for your application
+extraEnv: {}
+
+url: null
