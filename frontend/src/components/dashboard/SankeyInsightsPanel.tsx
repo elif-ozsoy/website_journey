@@ -231,6 +231,8 @@ export default function SankeyInsightsPanel({
             </div>
           )}
 
+          
+
           {/* ── Divergence card ── */}
           {hasDivergence && (
             <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>

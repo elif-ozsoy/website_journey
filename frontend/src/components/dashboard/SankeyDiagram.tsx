@@ -1,5 +1,4 @@
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
-import { createPortal } from 'react-dom'
 import * as d3 from 'd3'
 import { sankey as d3Sankey, sankeyLinkHorizontal } from 'd3-sankey'
 import type { AgentStep } from '../agent/agentTypes'
@@ -13,7 +12,6 @@ interface Props {
   humanJourneys?: AgentStep[][]
   agentLabels?: string[]
   humanLabels?: string[]
-  onDivergencesChange?: (divergences: NodeDivergence[]) => void
 }
 
 /* ── Color tokens ──
@@ -827,7 +825,6 @@ export default function SankeyDiagram({
   humanJourneys = [],
   agentLabels,
   humanLabels,
-  onDivergencesChange,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -925,10 +922,7 @@ export default function SankeyDiagram({
     () => new Set(divergences.map(d => d.nodeId)),
     [divergences],
   )
-
-  useEffect(() => {
-    onDivergencesChange?.(divergences)
-  }, [divergences, onDivergencesChange])
+  const [showDivergencePanel, setShowDivergencePanel] = useState(true)
 
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [hoverJourneyId, setHoverJourneyId] = useState<string | null>(null)
@@ -1195,121 +1189,246 @@ export default function SankeyDiagram({
       fontFamily: 'Inter, system-ui, sans-serif',
     }}>
       {/* Header */}
-      <div style={{ marginBottom: 8, flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12, flexShrink: 0, flexWrap: 'wrap', gap: 10 }}>
+        <div>
           <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>
             Journey milestones
           </div>
-          <div style={{ fontSize: '0.72rem', color: TEXT_MUTED }}>
-            link width = steps spent · hover for details · click flow to inspect run
+          <div style={{ fontSize: '0.72rem', color: TEXT_MUTED, marginTop: 2 }}>
+            {agentJourneys.length} agent · {humanJourneys.length} human · link width = steps spent · hover for detail · click runs in legend to hide
           </div>
         </div>
-        {/* Compact run filter chips */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+        {someHidden && (
+          <button
+            onClick={() => setHiddenJourneyIds(new Set())}
+            style={{
+              fontSize: '0.72rem', padding: '4px 10px', borderRadius: 4,
+              border: '1px solid #cbd5e1', background: '#fff', color: TEXT_DARK,
+              cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit',
+            }}
+          >
+            {hiddenJourneyIds.size} hidden · show all
+          </button>
+        )}
+      </div>
+
+      {/* Divergence panel */}
+      {divergences.length > 0 && (
+        <div style={{
+          marginBottom: 12, padding: '10px 12px',
+          border: '1px solid #fbbf24', borderRadius: 6,
+          background: '#fffbeb', flexShrink: 0,
+          maxHeight: 220, overflowY: 'auto',
+        }}>
+          <div
+            onClick={() => setShowDivergencePanel(v => !v)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              cursor: 'pointer', marginBottom: showDivergencePanel ? 8 : 0,
+            }}
+          >
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 16, height: 16, borderRadius: '50%', background: '#f59e0b',
+              color: '#fff', fontSize: '0.6rem', fontWeight: 800,
+            }}>⚡</span>
+            <span style={{
+              fontSize: '0.66rem', fontWeight: 700, textTransform: 'uppercase',
+              letterSpacing: '0.06em', color: '#92400e',
+            }}>
+              {divergences.length} divergence{divergences.length !== 1 ? 's' : ''} detected
+            </span>
+            <span style={{ marginLeft: 'auto', fontSize: '0.65rem', color: '#b45309' }}>
+              {showDivergencePanel ? '▼' : '▶'}
+            </span>
+          </div>
+
+          {showDivergencePanel && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {divergences.map(d => (
+                <div key={d.nodeId} style={{
+                  paddingLeft: 22, borderLeft: '2px solid #fbbf24',
+                }}>
+                  <div style={{
+                    fontSize: '0.72rem', fontWeight: 700, color: '#78350f',
+                    marginBottom: 4,
+                  }}>
+                    At <span style={{ fontFamily: 'monospace' }}>{d.nodeName}</span> · {d.groups.length} ways
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {d.groups.map((g, gi) => (
+                      <div key={gi} style={{
+                        fontSize: '0.7rem', color: TEXT_DARK,
+                        display: 'flex', alignItems: 'flex-start', gap: 6,
+                      }}>
+                        <span style={{ color: '#b45309', fontWeight: 700, flexShrink: 0 }}>•</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>
+                            "{truncate(g.label, 48)}"
+                          </span>
+                          <span style={{ color: TEXT_MUTED, marginLeft: 6 }}>
+                            ({g.visits.map(v => {
+                              const meta = journeyMap.get(v.journeyId)
+                              return meta?.label ?? v.journeyId
+                            }).join(', ')})
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Body */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', gap: 12 }}>
+        <div ref={containerRef} style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
+          {hasData ? (
+            <svg ref={svgRef} style={{ display: 'block' }} />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: TEXT_MUTED, gap: 8 }}>
+              <span style={{ fontWeight: 600, color: '#64748b' }}>No navigation data yet</span>
+              <span style={{ textAlign: 'center', maxWidth: 320, fontSize: '0.78rem' }}>
+                Run an agent or record a human session to see the flow diagram.
+              </span>
+            </div>
+          )}
+
+          {tooltip && (
+            <div
+              style={{
+                position: 'absolute',
+                left: tooltip.x, top: tooltip.y,
+                pointerEvents: 'none',
+                background: '#ffffff',
+                border: `1px solid ${BORDER}`,
+                borderRadius: 6,
+                boxShadow: '0 6px 24px rgba(15,23,42,0.18)',
+                padding: 10,
+                maxWidth: 480,
+                minWidth: 320,
+                fontSize: '0.72rem',
+                color: TEXT_DARK,
+                zIndex: 10,
+              }}
+            >
+              <TooltipBody t={tooltip} />
+            </div>
+          )}
+        </div>
+
+        {/* Legend */}
+        <div style={{ width: 180, flexShrink: 0, overflow: 'auto', borderLeft: `1px solid ${BORDER}`, paddingLeft: 10 }}>
+          <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          marginBottom: 6 
+        }}>
+          <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748b' }}>
+            Runs ({journeys.length})
+          </div>
+          <button 
+            onClick={showAllRuns}
+            style={{
+              background: 'none', border: 'none', padding: 0,
+              fontSize: '0.65rem', color: AGENT_COLOR, fontWeight: 600,
+              cursor: 'pointer', textDecoration: 'underline'
+            }}
+          >
+            Reset View
+          </button>
+        </div>
+
+        {/* Compact Bulk Filter Buttons */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 8 }}>
           <button
             onClick={() => showOnlyKind('agent')}
             style={{
-              padding: '2px 8px', fontSize: '0.67rem', fontWeight: 600,
-              borderRadius: 99, cursor: 'pointer', border: `1px solid ${AGENT_COLOR}`,
-              background: `${AGENT_COLOR}18`, color: AGENT_COLOR, fontFamily: 'inherit',
+              padding: '3px 4px', fontSize: '0.65rem', fontWeight: 600,
+              borderRadius: 4, cursor: 'pointer', textAlign: 'center',
+              border: '1px solid #e2e8f0', background: '#f8fafc', color: AGENT_COLOR,
+              fontFamily: 'inherit'
             }}
-          >AI Only</button>
+          >
+            AI Only
+          </button>
           <button
             onClick={() => showOnlyKind('human')}
             style={{
-              padding: '2px 8px', fontSize: '0.67rem', fontWeight: 600,
-              borderRadius: 99, cursor: 'pointer', border: `1px solid ${HUMAN_COLOR}`,
-              background: `${HUMAN_COLOR}18`, color: HUMAN_COLOR, fontFamily: 'inherit',
+              padding: '3px 4px', fontSize: '0.65rem', fontWeight: 600,
+              borderRadius: 4, cursor: 'pointer', textAlign: 'center',
+              border: '1px solid #e2e8f0', background: '#f8fafc', color: HUMAN_COLOR,
+              fontFamily: 'inherit'
             }}
-          >Human Only</button>
-          {(someHidden || allHidden) && (
-            <button
-              onClick={showAllRuns}
-              style={{
-                padding: '2px 8px', fontSize: '0.67rem', fontWeight: 600,
-                borderRadius: 99, cursor: 'pointer', border: '1px solid #cbd5e1',
-                background: '#fff', color: TEXT_DARK, fontFamily: 'inherit',
-              }}
-            >Show All</button>
+          >
+            Human Only
+          </button>
+  </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {journeys.map(j => {
+              const hidden = hiddenJourneyIds.has(j.id)
+              const color = colorForJourney(j.kind, j.index)
+              return (
+                <button
+                  key={j.id}
+                  onClick={() => onLegendClick(j.id)}
+                  onMouseEnter={() => onLegendHover(j.id)}
+                  onMouseLeave={() => onLegendHover(null)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px',
+                    borderRadius: 4, border: 'none',
+                    background: 'transparent',
+                    color: hidden ? TEXT_MUTED : color,
+                    fontSize: '0.72rem', fontWeight: 600,
+                    cursor: 'pointer', textAlign: 'left',
+                    fontFamily: 'inherit',
+                    textDecoration: hidden ? 'line-through' : 'none',
+                    opacity: hidden ? 0.55 : 1,
+                  }}
+                  title={hidden ? 'Click to show' : 'Click to hide'}
+                >
+                  <span style={{
+                    width: 10, height: 10, borderRadius: 2,
+                    background: hidden ? 'transparent' : color,
+                    border: hidden ? `1.5px solid ${TEXT_MUTED}` : 'none',
+                    flexShrink: 0,
+                  }} />
+                  <span style={{
+                    flex: 1, overflow: 'hidden', textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {j.label}
+                  </span>
+                  <span style={{ fontSize: '0.65rem', color: TEXT_MUTED, fontWeight: 500 }}>
+                    {j.steps.length}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          {allHidden && (
+            <div style={{ marginTop: 8, fontSize: '0.7rem', color: TEXT_MUTED, fontStyle: 'italic', padding: '0 6px' }}>
+              All runs hidden. Click one to show it again.
+            </div>
           )}
-          <span style={{ width: 1, height: 12, background: BORDER, margin: '0 2px', flexShrink: 0 }} />
-          {journeys.map(j => {
-            const hidden = hiddenJourneyIds.has(j.id)
-            const color = colorForJourney(j.kind, j.index)
-            return (
-              <button
-                key={j.id}
-                onClick={() => onLegendClick(j.id)}
-                onMouseEnter={() => onLegendHover(j.id)}
-                onMouseLeave={() => onLegendHover(null)}
-                title={hidden ? 'Click to show' : 'Click to hide'}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  padding: '2px 7px', borderRadius: 99, border: `1px solid ${hidden ? BORDER : color}`,
-                  background: hidden ? 'transparent' : `${color}15`,
-                  color: hidden ? TEXT_MUTED : color,
-                  fontSize: '0.67rem', fontWeight: 600,
-                  cursor: 'pointer', fontFamily: 'inherit',
-                  textDecoration: hidden ? 'line-through' : 'none',
-                  opacity: hidden ? 0.6 : 1,
-                }}
-              >
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: hidden ? TEXT_MUTED : color, flexShrink: 0 }} />
-                {j.label}
-              </button>
-            )
-          })}
         </div>
       </div>
 
-      {/* Body */}
-      <div ref={containerRef} style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
-        {hasData ? (
-          <svg ref={svgRef} style={{ display: 'block' }} />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: TEXT_MUTED, gap: 8 }}>
-            <span style={{ fontWeight: 600, color: '#64748b' }}>No navigation data yet</span>
-            <span style={{ textAlign: 'center', maxWidth: 320, fontSize: '0.78rem' }}>
-              Run an agent or record a human session to see the flow diagram.
-            </span>
-          </div>
-        )}
-
-        {tooltip && (
-          <div
-            style={{
-              position: 'absolute',
-              left: tooltip.x, top: tooltip.y,
-              pointerEvents: 'none',
-              background: '#ffffff',
-              border: `1px solid ${BORDER}`,
-              borderRadius: 6,
-              boxShadow: '0 6px 24px rgba(15,23,42,0.18)',
-              padding: 10,
-              maxWidth: 480,
-              minWidth: 320,
-              fontSize: '0.72rem',
-              color: TEXT_DARK,
-              zIndex: 10,
-            }}
-          >
-            <TooltipBody t={tooltip} />
-          </div>
-        )}
-      </div>
-
-      {/* Journey detail modal — rendered via portal so it always escapes overflow:hidden parents */}
+      {/* Journey detail modal */}
       {modalJourneyId && (() => {
         const j = journeyMap.get(modalJourneyId)
         if (!j) return null
         const color = colorForJourney(j.kind, j.index)
-        return createPortal(
+        return (
           <JourneyDetailModal
             journey={j}
             color={color}
             onClose={() => setModalJourneyId(null)}
-          />,
-          document.body,
+          />
         )
       })()}
     </div>
