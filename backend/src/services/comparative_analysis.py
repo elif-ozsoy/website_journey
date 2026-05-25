@@ -43,7 +43,18 @@ Analyse the journeys and respond ONLY with a JSON object (no markdown, no explan
           "agent_bullets": ["what the agent did differently from humans — ≤12 words, must ref step N or /url", "...", "..."],
           "human_bullets": ["what humans did naturally (target behaviour) — ≤12 words, must ref step N or /url", "...", "..."],
           "diagrams": [
-            {"view": "compare" | "sankey" | "heatmap" | "multiflow" | "similarity" | "comparative" | "insights" | "human_agg" | "policy", "reason": "one sentence: what specifically to look for in this diagram that evidences the issue"}
+            {
+              "view": "compare",
+              "reason": "one sentence: what specifically to look for in this diagram that evidences the issue",
+              "highlight": {
+                "sections": ["action_mix", "session_variance"],
+                "side": "ai",
+                "metrics": ["median_steps"],
+                "action_types": ["scroll", "navigate"],
+                "pages": ["/checkout"]
+              },
+              "diagram_explanation": "2–3 sentences: explain how the highlighted sections connect to this action point, what the user should look for in each highlighted section, and why these parts of the diagram are relevant to the issue, as precice as possible referring to numbers the user sees"
+            }
           ]
         }
       ],
@@ -56,7 +67,18 @@ Analyse the journeys and respond ONLY with a JSON object (no markdown, no explan
           "agent_bullets": ["what the agent did differently from humans — ≤12 words, must ref step N or /url", "...", "..."],
           "human_bullets": ["what humans did naturally (target behaviour) — ≤12 words, must ref step N or /url", "...", "..."],
           "diagrams": [
-            {"view": "compare" | "sankey" | "heatmap", "reason": "one sentence: what this diagram shows that motivates this recommendation"}
+            {
+              "view": "compare",
+              "reason": "one sentence: what this diagram shows that motivates this recommendation",
+              "highlight": {
+                "sections": ["steps_per_page"],
+                "side": "both",
+                "metrics": [],
+                "action_types": [],
+                "pages": ["/target-page"]
+              },
+              "diagram_explanation": "2–3 sentences: explain how the highlighted sections connect to this recommendation, what the user should look for, and why these parts are relevant"
+            }
           ]
         }
       ]
@@ -77,7 +99,14 @@ Guidelines:
 - Each pain_point and recommendation must address a clearly distinct UX issue. If you find yourself writing two items that differ only by where on the page something appears, merge them.
 - Aim for 2–5 pain_points and 2–5 recommendations per task. Quality over quantity. If there are less, output less.
 - For diagrams: select 0–3 diagrams per point — only those where the evidence is most directly visible. If no diagram genuinely shows this issue, use an empty array. Never pad with diagrams just for completeness. Avoid selecting multiple diagrams that show the same kind of evidence (e.g. "compare" and "insights" both show step counts — pick the better one, not both). Available views and what they show:
-  * "compare" — side-by-side AI vs Human bar charts: total steps, unique pages visited, action-type breakdown (clicks/scrolls/inputs/backtracks), per-page step counts. Best for: effort differences, efficiency gaps, excessive backtracking, action-type anomalies.
+  * "compare" — side-by-side AI vs Human bar charts: total steps, unique pages visited, action-type breakdown (clicks/scrolls/inputs/backtracks), per-page step counts. Best for: effort differences, efficiency gaps, excessive backtracking, action-type anomalies. When selecting "compare", you MUST also include:
+      - "highlight": an object specifying exactly what to highlight in the chart so the user can immediately see the evidence. Fields (omit any field whose value would be empty — do not include empty arrays or irrelevant fields):
+          * "sections": array of section names to visually highlight. Valid values: "stats" (the summary metrics grid at top), "action_breakdown" (donut chart of action types), "action_mix" (horizontal bars per action type), "steps_per_page" (bars showing how many steps on each page), "page_revisits" (pages visited more than once — indicates confusion), "session_variance" (box plot of session length distribution), "time_per_action" (time spent per action type)
+          * "side": which column to emphasize — "ai", "human", or "both"
+          * "metrics": which specific stat cells to highlight in the stats grid. Valid: "median_steps", "unique_pages", "click_rate", "scroll_rate", "avg_duration", "total_steps", "avg_steps", "shared_pages"
+          * "action_types": which action type rows to highlight within action_mix / time_per_action / action_breakdown sections. Valid: "click_element", "input_text", "scroll", "navigate", "extract_content", "other"
+          * "pages": which page path strings to highlight in steps_per_page / page_revisits sections (e.g. ["/checkout", "/products"])
+      - "diagram_explanation": 2–3 sentences written for the UX designer that are as precise and data-grounded as possible. Directly reference the specific numbers, ratios, and values the user will see in the highlighted sections (e.g. "The AI took 14 steps on /checkout vs 4 for humans — a 3.5× gap visible in the Steps per Page section"). Connect those concrete numbers to the action point. Explain why the highlighted values constitute evidence for this issue. This text replaces the generic chart description when the user arrives via this action point — it must be immediately useful to a designer looking at the chart.
   * "sankey" — page-to-page flow diagram; link width = number of sessions that took that transition. Best for: wrong turns, detours, dead ends, divergent navigation paths between agent and human.
   * "heatmap" — screenshot overlays with click density (red = many clicks, blue = few). Best for: missed click targets, wrong elements clicked, interaction patterns on a specific page, invisible or hard-to-find UI elements.
   * "multiflow" — every journey rendered in parallel swim lanes so you can see all runs at once. Best for: outlier runs, sessions that took a completely different path, spotting the one user who succeeded differently.
@@ -226,7 +255,7 @@ def run_comparative_analysis(
             thinking={"type": "enabled", "budget_tokens": 3000},
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_content}],
-            betas=["interleaved-thinking-2025-05-14"],
+            extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
         )
         raw = next(b.text for b in msg.content if b.type == "text").strip()
     else:
@@ -248,7 +277,7 @@ def run_comparative_analysis(
         )
         raw = resp.choices[0].message.content.strip()
 
-    return _parse_llm_json(raw)
+    return _post_process(_parse_llm_json(raw))
 
 
 def _parse_llm_json(raw: str) -> dict:
@@ -272,3 +301,30 @@ def _parse_llm_json(raw: str) -> dict:
             except json.JSONDecodeError:
                 pass
         raise ValueError(f"LLM response was not valid JSON: {exc}") from exc
+
+
+def _post_process(result: dict) -> dict:
+    """Remove blank and duplicate pain_points / recommendations from each task analysis."""
+    import re
+
+    def _norm(text: str) -> str:
+        return re.sub(r"\W+", " ", text.lower().strip())[:80]
+
+    for task in result.get("task_analyses", []):
+        for key in ("pain_points", "recommendations"):
+            items = task.get(key, [])
+            seen: set[str] = set()
+            cleaned = []
+            for item in items:
+                text = item.get("text", "").strip() if isinstance(item, dict) else str(item).strip()
+                if not text:
+                    continue
+                norm = _norm(text)
+                if norm in seen:
+                    log.debug("Dedup: dropping duplicate %s item: %.60s", key, text)
+                    continue
+                seen.add(norm)
+                cleaned.append(item)
+            task[key] = cleaned
+
+    return result

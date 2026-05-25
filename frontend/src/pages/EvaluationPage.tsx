@@ -177,16 +177,13 @@ export default function EvaluationPage() {
       <div className="eval-ctx-bar">
         <div className="eval-ctx-bar-inner">
 
-          {/* Back → Home */}
-          <button
-            onClick={() => navigate('/projects')}
-            title="Back to Home"
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', background: 'none', cursor: 'pointer', color: 'var(--gray400)', flexShrink: 0, transition: 'background 0.1s, color 0.1s' }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gray100)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--gray900)' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--gray400)' }}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3L5 8l5 5"/></svg>
-          </button>
+          {/* Left: back + view name */}
+          <div className="dash-topbar-left">
+            <button onClick={() => navigate('/projects')} title="Back to Home" className="dash-topbar-back">
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3L5 8l5 5"/></svg>
+            </button>
+            <span className="dash-topbar-view-name">Project Overview</span>
+          </div>
 
           <div style={{ flex: 1 }} />
 

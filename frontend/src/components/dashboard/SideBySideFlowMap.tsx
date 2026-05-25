@@ -60,8 +60,8 @@ export default function SideBySideFlowMap({
         <div
           style={{
             padding: '10px 16px',
-            background: '#ecfdf5',
-            borderBottom: '2px solid #10b981',
+            background: 'var(--human-pale)',
+            borderBottom: '2px solid #881342',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -69,7 +69,7 @@ export default function SideBySideFlowMap({
           }}
         >
           <div>
-            <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: '#0d9488' }}>
+            <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: '#881342' }}>
               Policy Bot — Human Policy
             </div>
             <div style={{ fontSize: 'var(--fs-small)', color: 'var(--text-muted)', marginTop: 2 }}>
@@ -79,7 +79,7 @@ export default function SideBySideFlowMap({
           {humanLoading ? (
             <button
               onClick={onStopHuman}
-              style={{ fontSize: 'var(--fs-small)', padding: '4px 10px', borderRadius: 6, border: '1px solid #10b981', background: 'transparent', color: '#0d9488', cursor: 'pointer' }}
+              style={{ fontSize: 'var(--fs-small)', padding: '4px 10px', borderRadius: 6, border: '1px solid #881342', background: 'transparent', color: '#881342', cursor: 'pointer' }}
             >
               Stop
             </button>
@@ -87,7 +87,7 @@ export default function SideBySideFlowMap({
             <button
               onClick={onRunHuman}
               disabled={!taskTitle}
-              style={{ fontSize: 'var(--fs-small)', padding: '4px 10px', borderRadius: 6, border: 'none', background: '#10b981', color: '#fff', cursor: taskTitle ? 'pointer' : 'not-allowed', opacity: taskTitle ? 1 : 0.5 }}
+              style={{ fontSize: 'var(--fs-small)', padding: '4px 10px', borderRadius: 6, border: 'none', background: '#881342', color: '#fff', cursor: taskTitle ? 'pointer' : 'not-allowed', opacity: taskTitle ? 1 : 0.5 }}
             >
               {humanPolicyFlow ? 'Re-run' : 'Run'}
             </button>
@@ -114,7 +114,7 @@ export default function SideBySideFlowMap({
           ) : humanLoading ? (
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
               {humanStatus && (
-                <div style={{ padding: '8px 16px', fontSize: 'var(--fs-small)', color: '#0d9488', background: '#f0fdf4', borderBottom: '1px solid #d1fae5', flexShrink: 0 }}>
+                <div style={{ padding: '8px 16px', fontSize: 'var(--fs-small)', color: '#881342', background: '#f7d5e2', borderBottom: '1px solid #f0c0d5', flexShrink: 0 }}>
                   {humanStatus}
                 </div>
               )}
@@ -148,7 +148,7 @@ export default function SideBySideFlowMap({
               {onRunHuman && taskTitle && (
                 <button
                   onClick={onRunHuman}
-                  style={{ marginTop: 4, fontSize: 'var(--fs-body)', padding: '6px 18px', borderRadius: 8, border: 'none', background: '#10b981', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                  style={{ marginTop: 4, fontSize: 'var(--fs-body)', padding: '6px 18px', borderRadius: 8, border: 'none', background: '#881342', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
                 >
                   Run Human Policy Bot
                 </button>
@@ -167,8 +167,8 @@ export default function SideBySideFlowMap({
         <div
           style={{
             padding: '10px 16px',
-            background: 'var(--brand-pale)',
-            borderBottom: '2px solid var(--accent)',
+            background: 'var(--agent-pale)',
+            borderBottom: '2px solid var(--agent-color)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -176,7 +176,7 @@ export default function SideBySideFlowMap({
           }}
         >
           <div>
-            <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--brand)' }}>
+            <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--agent-color)' }}>
               Policy Bot — AI Policy
             </div>
             <div style={{ fontSize: 'var(--fs-small)', color: 'var(--text-muted)', marginTop: 2 }}>
@@ -186,7 +186,7 @@ export default function SideBySideFlowMap({
           {aiLoading ? (
             <button
               onClick={onStopAi}
-              style={{ fontSize: 'var(--fs-small)', padding: '4px 10px', borderRadius: 6, border: '1px solid var(--accent)', background: 'transparent', color: 'var(--brand)', cursor: 'pointer' }}
+              style={{ fontSize: 'var(--fs-small)', padding: '4px 10px', borderRadius: 6, border: '1px solid var(--agent-color)', background: 'transparent', color: 'var(--agent-color)', cursor: 'pointer' }}
             >
               Stop
             </button>
@@ -194,7 +194,7 @@ export default function SideBySideFlowMap({
             <button
               onClick={onRunAi}
               disabled={!taskTitle}
-              style={{ fontSize: 'var(--fs-small)', padding: '4px 10px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: taskTitle ? 'pointer' : 'not-allowed', opacity: taskTitle ? 1 : 0.5 }}
+              style={{ fontSize: 'var(--fs-small)', padding: '4px 10px', borderRadius: 6, border: 'none', background: 'var(--agent-color)', color: '#fff', cursor: taskTitle ? 'pointer' : 'not-allowed', opacity: taskTitle ? 1 : 0.5 }}
             >
               {aiPolicyFlow ? 'Re-run' : 'Run'}
             </button>
@@ -221,7 +221,7 @@ export default function SideBySideFlowMap({
           ) : aiLoading ? (
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
               {aiStatus && (
-                <div style={{ padding: '8px 16px', fontSize: 'var(--fs-small)', color: 'var(--brand)', background: 'var(--brand-pale)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+                <div style={{ padding: '8px 16px', fontSize: 'var(--fs-small)', color: 'var(--agent-color)', background: 'var(--agent-pale)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
                   {aiStatus}
                 </div>
               )}
@@ -255,7 +255,7 @@ export default function SideBySideFlowMap({
               {onRunAi && taskTitle && (
                 <button
                   onClick={onRunAi}
-                  style={{ marginTop: 4, fontSize: 'var(--fs-body)', padding: '6px 18px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                  style={{ marginTop: 4, fontSize: 'var(--fs-body)', padding: '6px 18px', borderRadius: 8, border: 'none', background: 'var(--agent-color)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
                 >
                   Run AI Policy Bot
                 </button>

@@ -69,24 +69,25 @@ function interpolateStops(t: number, stops: Array<[number, number, number]>, max
 }
 
 // Cool blue gradient: transparent → blue → cyan → green → yellow → red
+// Agent heatmap: dark teal (#32494B) family, cold→hot
 function intensityToRgba(t: number): [number, number, number, number] {
   return interpolateStops(t, [
-    [0, 0, 255],
-    [0, 255, 255],
-    [0, 255, 0],
-    [255, 255, 0],
-    [255, 0, 0],
+    [20, 40, 42],
+    [50, 73, 75],
+    [0, 130, 140],
+    [0, 210, 225],
+    [180, 255, 255],
   ])
 }
 
-// Warm red gradient: transparent → deep-blue → dark-red → red → orange → yellow
+// Human heatmap: deep rose (#881342) family, cold→hot
 function intensityToRgbaWarm(t: number): [number, number, number, number] {
   return interpolateStops(t, [
-    [0, 0, 200],
-    [180, 0, 0],
-    [255, 0, 0],
-    [255, 140, 0],
-    [255, 255, 0],
+    [80, 10, 40],
+    [136, 19, 66],
+    [200, 40, 100],
+    [255, 80, 140],
+    [255, 190, 215],
   ])
 }
 
@@ -155,11 +156,13 @@ function colorizeLayer(
   }
 }
 
-export function HeatmapCanvas({ dots, width, height, colorMode = 'unified' }: {
+export function HeatmapCanvas({ dots, width, height, colorMode = 'unified', fitToContent = false }: {
   dots: HeatmapDot[]
   width: number
   height: number
   colorMode?: 'unified' | 'split'
+  /** When true the canvas fills the full scrollable content height instead of the visible viewport */
+  fitToContent?: boolean
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -223,7 +226,10 @@ export function HeatmapCanvas({ dots, width, height, colorMode = 'unified' }: {
   return (
     <canvas
       ref={canvasRef}
-      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1 }}
+      style={fitToContent
+        ? { position: 'absolute', top: 0, left: 0, width: '100%', height: `${height}px`, pointerEvents: 'none', zIndex: 1 }
+        : { position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1 }
+      }
     />
   )
 }
@@ -293,7 +299,9 @@ export default function ScreenshotCarousel({
             onMouseLeave={() => setHoveredAnnotation(null)}
             onClick={() => onAnnotationClick(i)}
           >
-            <div className="sc-ann-dot" style={{ background: TYPE_COLOR[ann.type] }} />
+            <div className="sc-ann-dot" style={{ background: TYPE_COLOR[ann.type], animationDelay: `${i * 0.12}s` }}>
+              <div className="sc-ann-pulse" style={{ borderColor: TYPE_COLOR[ann.type], animationDelay: `${i * 0.4}s` }} />
+            </div>
             <div
               className={clsx('sc-ann-tooltip', `sc-ann-${ann.arrowDir}`, highlighted === i && 'visible')}
               style={{ background: TYPE_BG[ann.type], borderColor: TYPE_COLOR[ann.type] }}

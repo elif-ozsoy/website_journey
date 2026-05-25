@@ -1,18 +1,24 @@
 import { useRef, useEffect, useMemo, useState } from 'react'
 import * as d3 from 'd3'
 import type { AgentStep } from '../agent/agentTypes'
-import type { JourneyResponse } from '../../lib/api'
+import type { JourneyResponse, CompareHighlight } from '../../lib/api'
 
-const AI_COLOR      = '#185FA5'
-const HUMAN_COLOR   = '#0d9488'
-const AI_PALE       = '#DCEBFA'
-const HUMAN_PALE    = '#f0fdfa'
-const AI_PALETTE    = ['#185FA5','#378ADD','#6BA8D4','#9EC5E3','#BEDAF2','#DCEBFA']
-const HUMAN_PALETTE = ['#0d9488','#14b8a6','#2dd4bf','#5eead4','#99f6e4','#ccfbf1']
+const AI_COLOR      = '#32494B'
+const HUMAN_COLOR   = '#881342'
+const AI_PALE       = '#e0ecee'
+const HUMAN_PALE    = '#f7d5e2'
+const AI_PALETTE    = ['#32494B','#3d5b5d','#496e70','#558183','#619496','#6da7a9']
+const HUMAN_PALETTE = ['#881342','#9e1852','#b41e62','#ca2472','#e02a82','#f63092']
 const ACTION_TYPES  = ['click_element','input_text','scroll','navigate','extract_content','other']
 
 function getPath(url: string) {
   try { return new URL(url).pathname.replace(/\/$/, '') || '/' } catch { return url.slice(0, 40) }
+}
+// Agent steps use time.time() (Unix seconds ~1.75e9).
+// Human steps use browser timestamps (Unix milliseconds ~1.75e12).
+// Normalise to milliseconds before computing durations.
+function toMs(ts: number): number {
+  return ts < 1e11 ? ts * 1000 : ts
 }
 function median(arr: number[]): number | null {
   if (!arr.length) return null
@@ -32,15 +38,30 @@ function fmt(n: number | null, decimals = 1): string {
 
 // ── Stats grid ────────────────────────────────────────────────────────────────
 
-function StatsGrid({ items, color }: { items: Array<{ label: string; value: string }>; color: string }) {
+const METRIC_LABEL_MAP: Record<string, string> = {
+  median_steps: 'Median steps',
+  unique_pages: 'Unique pages',
+  click_rate: 'Click rate',
+  scroll_rate: 'Scroll rate',
+  avg_duration: 'Avg duration',
+  total_steps: 'Total steps',
+  avg_steps: 'Avg steps',
+  shared_pages: 'Shared pages',
+}
+
+function StatsGrid({ items, color, highlightMetrics }: { items: Array<{ label: string; value: string }>; color: string; highlightMetrics?: string[] }) {
+  const hlLabels = highlightMetrics?.map(m => METRIC_LABEL_MAP[m]).filter(Boolean) ?? []
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, background: 'var(--gray100)', border: '1px solid var(--gray100)', borderRadius: 7, overflow: 'hidden' }}>
-      {items.map((item, i) => (
-        <div key={i} style={{ background: 'var(--white)', padding: '8px 8px', textAlign: 'center' }}>
-          <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{item.value}</div>
-          <div style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', marginTop: 3, fontWeight: 500 }}>{item.label}</div>
-        </div>
-      ))}
+      {items.map((item, i) => {
+        const isHl = hlLabels.includes(item.label)
+        return (
+          <div key={i} style={{ background: isHl ? 'rgba(37,99,235,0.07)' : 'var(--white)', padding: '8px 8px', textAlign: 'center', boxShadow: isHl ? 'inset 0 0 0 1.5px rgba(37,99,235,0.3)' : undefined }}>
+            <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{item.value}</div>
+            <div style={{ fontSize: 'var(--fs-small)', color: isHl ? 'var(--brand)' : 'var(--gray400)', marginTop: 3, fontWeight: isHl ? 700 : 500 }}>{item.label}</div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -87,7 +108,7 @@ function DonutChart({ steps, color, palette, label }: { steps: AgentStep[]; colo
 
 // ── Page bars ─────────────────────────────────────────────────────────────────
 
-function PageBarsChart({ steps, color, topN = 6, maxVal }: { steps: AgentStep[]; color: string; topN?: number; maxVal?: number }) {
+function PageBarsChart({ steps, color, topN = 6, maxVal, highlightPages }: { steps: AgentStep[]; color: string; topN?: number; maxVal?: number; highlightPages?: string[] }) {
   const data = useMemo(() => {
     const m = new Map<string, number>()
     steps.forEach(s => { const p = getPath(s.url); m.set(p, (m.get(p) ?? 0) + 1) })
@@ -97,22 +118,25 @@ function PageBarsChart({ steps, color, topN = 6, maxVal }: { steps: AgentStep[];
   if (!data.length) return <div style={{ height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 'var(--fs-small)' }}>No data</div>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      {data.map(([page, count]) => (
-        <div key={page} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <div style={{ width: 70, fontSize: 'var(--fs-small)', color: 'var(--gray500)', fontFamily: 'var(--font-sans)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }} title={page}>{page}</div>
-          <div style={{ flex: 1, height: 5, background: 'var(--gray100)', borderRadius: 3, overflow: 'hidden' }}>
-            <div style={{ width: `${(count / max) * 100}%`, height: '100%', background: color, borderRadius: 3 }} />
+      {data.map(([page, count]) => {
+        const isHl = highlightPages?.some(p => page === p || page.startsWith(p))
+        return (
+          <div key={page} style={{ display: 'flex', alignItems: 'center', gap: 7, ...(isHl ? { background: 'rgba(37,99,235,0.07)', borderRadius: 4, margin: '0 -4px', padding: '2px 4px' } : {}) }}>
+            <div style={{ width: 70, fontSize: 'var(--fs-small)', color: isHl ? 'var(--brand)' : 'var(--gray500)', fontFamily: 'var(--font-sans)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0, fontWeight: isHl ? 700 : undefined }} title={page}>{page}</div>
+            <div style={{ flex: 1, height: 5, background: 'var(--gray100)', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ width: `${(count / max) * 100}%`, height: '100%', background: color, borderRadius: 3 }} />
+            </div>
+            <div style={{ fontSize: 'var(--fs-small)', fontWeight: 600, color: 'var(--gray600)', minWidth: 18, textAlign: 'right' }}>{count}</div>
           </div>
-          <div style={{ fontSize: 'var(--fs-small)', fontWeight: 600, color: 'var(--gray600)', minWidth: 18, textAlign: 'right' }}>{count}</div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
 
 // ── Re-visit rate ─────────────────────────────────────────────────────────────
 
-function RevisitChart({ steps, color, maxVal }: { steps: AgentStep[]; color: string; maxVal?: number }) {
+function RevisitChart({ steps, color, maxVal, highlightPages }: { steps: AgentStep[]; color: string; maxVal?: number; highlightPages?: string[] }) {
   const data = useMemo(() => {
     const m = new Map<string, number>()
     steps.forEach(s => { const p = getPath(s.url); m.set(p, (m.get(p) ?? 0) + 1) })
@@ -122,15 +146,18 @@ function RevisitChart({ steps, color, maxVal }: { steps: AgentStep[]; color: str
   const max = maxVal ?? Math.max(...data.map(d => d[1]), 1)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      {data.map(([page, count]) => (
-        <div key={page} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <div style={{ width: 70, fontSize: 'var(--fs-small)', color: 'var(--gray500)', fontFamily: 'var(--font-sans)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }} title={page}>{page}</div>
-          <div style={{ flex: 1, height: 5, background: 'var(--gray100)', borderRadius: 3, overflow: 'hidden' }}>
-            <div style={{ width: `${(count / max) * 100}%`, height: '100%', background: color, opacity: 0.75, borderRadius: 3 }} />
+      {data.map(([page, count]) => {
+        const isHl = highlightPages?.some(p => page === p || page.startsWith(p))
+        return (
+          <div key={page} style={{ display: 'flex', alignItems: 'center', gap: 7, ...(isHl ? { background: 'rgba(37,99,235,0.07)', borderRadius: 4, margin: '0 -4px', padding: '2px 4px' } : {}) }}>
+            <div style={{ width: 70, fontSize: 'var(--fs-small)', color: isHl ? 'var(--brand)' : 'var(--gray500)', fontFamily: 'var(--font-sans)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0, fontWeight: isHl ? 700 : undefined }} title={page}>{page}</div>
+            <div style={{ flex: 1, height: 5, background: 'var(--gray100)', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ width: `${(count / max) * 100}%`, height: '100%', background: color, opacity: 0.75, borderRadius: 3 }} />
+            </div>
+            <div style={{ fontSize: 'var(--fs-small)', fontWeight: 600, color, minWidth: 24, textAlign: 'right' }}>{count}×</div>
           </div>
-          <div style={{ fontSize: 'var(--fs-small)', fontWeight: 600, color, minWidth: 24, textAlign: 'right' }}>{count}×</div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -139,13 +166,13 @@ function RevisitChart({ steps, color, maxVal }: { steps: AgentStep[]; color: str
 
 // ── Action mix (per side) ─────────────────────────────────────────────────────
 
-function ActionMixBars({ steps, color }: { steps: AgentStep[]; color: string }) {
+function ActionMixBars({ steps, color, highlightTypes }: { steps: AgentStep[]; color: string; highlightTypes?: string[] }) {
   const rows = useMemo(() => {
     const totals: Record<string, number> = {}
     steps.forEach(s => { const t = ACTION_TYPES.includes(s.action_type) ? s.action_type : 'other'; totals[t] = (totals[t] ?? 0) + 1 })
     const total = steps.length || 1
     return ACTION_TYPES
-      .map(t => ({ name: t.replace(/_/g, ' '), pct: steps.length ? Math.round((totals[t] ?? 0) / total * 100) : 0, count: totals[t] ?? 0 }))
+      .map(t => ({ type: t, name: t.replace(/_/g, ' '), pct: steps.length ? Math.round((totals[t] ?? 0) / total * 100) : 0, count: totals[t] ?? 0 }))
       .filter(r => r.count > 0)
       .sort((a, b) => b.pct - a.pct)
   }, [steps])
@@ -153,15 +180,18 @@ function ActionMixBars({ steps, color }: { steps: AgentStep[]; color: string }) 
   if (!rows.length) return <div style={{ height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 'var(--fs-small)' }}>No data</div>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      {rows.map(r => (
-        <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <div style={{ width: 80, fontSize: 'var(--fs-small)', color: 'var(--gray500)', flexShrink: 0 }}>{r.name}</div>
-          <div style={{ flex: 1, height: 5, background: 'var(--gray100)', borderRadius: 3, overflow: 'hidden' }}>
-            <div style={{ width: `${r.pct}%`, height: '100%', background: color, borderRadius: 3 }} />
+      {rows.map(r => {
+        const isHl = highlightTypes?.includes(r.type)
+        return (
+          <div key={r.type} style={{ display: 'flex', alignItems: 'center', gap: 7, ...(isHl ? { background: 'rgba(37,99,235,0.07)', borderRadius: 4, margin: '0 -4px', padding: '2px 4px' } : {}) }}>
+            <div style={{ width: 80, fontSize: 'var(--fs-small)', color: isHl ? 'var(--brand)' : 'var(--gray500)', flexShrink: 0, fontWeight: isHl ? 700 : undefined }}>{r.name}</div>
+            <div style={{ flex: 1, height: 5, background: 'var(--gray100)', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ width: `${r.pct}%`, height: '100%', background: color, borderRadius: 3 }} />
+            </div>
+            <div style={{ fontSize: 'var(--fs-small)', fontWeight: 600, color: 'var(--gray500)', minWidth: 28, textAlign: 'right' }}>{r.pct}%</div>
           </div>
-          <div style={{ fontSize: 'var(--fs-small)', fontWeight: 600, color: 'var(--gray500)', minWidth: 28, textAlign: 'right' }}>{r.pct}%</div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -221,10 +251,32 @@ function BoxPlot({ counts, color, maxVal }: { counts: number[]; color: string; m
       g.append('circle').attr('cx', x(v)).attr('cy', cy).attr('r', 3.5)
         .attr('fill', 'none').attr('stroke', color).attr('stroke-width', 1.3).attr('opacity', 0.7)
     })
-    // legend: Q1 / med / Q3 labels
-    ;[{ v: q1, label: `Q1 ${q1}` }, { v: med, label: `med ${med}` }, { v: q3, label: `Q3 ${q3}` }].forEach(({ v, label }) => {
-      g.append('text').attr('x', x(v)).attr('y', -2).attr('text-anchor', 'middle')
-        .style('font-size', '7px').style('fill', color).style('opacity', '0.75').text(label)
+    // legend: Q1 / med / Q3 labels — stagger vertically when values are close
+    const rawLabels = [
+      { v: q1, label: `Q1 ${q1}` },
+      { v: med, label: `med ${med}` },
+      { v: q3, label: `Q3 ${q3}` },
+    ]
+    // Deduplicate identical positions so we don't render 3 overlapping labels
+    const seen = new Set<number>()
+    const deduped: { v: number; label: string }[] = []
+    for (const item of rawLabels) {
+      const key = Math.round(x(item.v))
+      if (!seen.has(key)) { seen.add(key); deduped.push(item) }
+      else {
+        // Merge label text onto the existing entry
+        const existing = deduped.find(d => Math.round(x(d.v)) === key)
+        if (existing && !existing.label.includes(item.label.split(' ')[0]))
+          existing.label += ` / ${item.label}`
+      }
+    }
+    // Stagger: if pixel distance < 32px between adjacent labels, alternate y offset
+    deduped.sort((a, b) => x(a.v) - x(b.v))
+    deduped.forEach((item, i) => {
+      const prevX = i > 0 ? x(deduped[i - 1].v) : -999
+      const yOff = (x(item.v) - prevX < 32 && i % 2 === 1) ? -11 : -2
+      g.append('text').attr('x', x(item.v)).attr('y', yOff).attr('text-anchor', 'middle')
+        .style('font-size', '7px').style('fill', color).style('opacity', '0.8').text(item.label)
     })
   }, [counts, color, maxVal])
 
@@ -234,30 +286,100 @@ function BoxPlot({ counts, color, maxVal }: { counts: number[]; color: string; m
   return <svg ref={svgRef} style={{ width: '100%', height: 'auto', display: 'block' }} />
 }
 
+// ── Time per action bars ─────────────────────────────────────────────────────
+
+function fmtSecs(secs: number): string {
+  if (secs < 60) return `${Math.round(secs)}s`
+  const m = Math.floor(secs / 60), s = Math.round(secs % 60)
+  return s > 0 ? `${m}m ${s}s` : `${m}m`
+}
+
+function TimeActionBars({ steps, color, sessionCounts, highlightTypes }: {
+  steps: AgentStep[]
+  color: string
+  sessionCounts?: number[]
+  highlightTypes?: string[]
+}) {
+  const data = useMemo(() => {
+    const timeByAction: Record<string, number> = {}
+    const sessions = sessionCounts
+      ? (() => {
+          const out: AgentStep[][] = []
+          let off = 0
+          for (const c of sessionCounts) { out.push(steps.slice(off, off + c)); off += c }
+          return out
+        })()
+      : [steps]
+
+    for (const sess of sessions) {
+      for (let i = 0; i < sess.length - 1; i++) {
+        const dt = (toMs(sess[i + 1].timestamp) - toMs(sess[i].timestamp)) / 1000
+        if (dt <= 0 || dt > 120) continue
+        const type = ACTION_TYPES.includes(sess[i].action_type) ? sess[i].action_type : 'other'
+        timeByAction[type] = (timeByAction[type] ?? 0) + dt
+      }
+    }
+
+    return ACTION_TYPES
+      .map(t => ({ type: t, name: t.replace(/_/g, ' '), secs: timeByAction[t] ?? 0 }))
+      .filter(d => d.secs > 0)
+      .sort((a, b) => b.secs - a.secs)
+  }, [steps, sessionCounts])
+
+  const max = Math.max(...data.map(d => d.secs), 1)
+  if (!data.length) return <div style={{ height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 'var(--fs-small)' }}>No data</div>
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      {data.map(r => {
+        const isHl = highlightTypes?.includes(r.type)
+        return (
+        <div key={r.type} style={{ display: 'flex', alignItems: 'center', gap: 7, ...(isHl ? { background: 'rgba(37,99,235,0.07)', borderRadius: 4, margin: '0 -4px', padding: '2px 4px' } : {}) }}>
+          <div style={{ width: 80, fontSize: 'var(--fs-small)', color: isHl ? 'var(--brand)' : 'var(--gray500)', flexShrink: 0, fontWeight: isHl ? 700 : undefined }}>{r.name}</div>
+          <div style={{ flex: 1, height: 5, background: 'var(--gray100)', borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{ width: `${(r.secs / max) * 100}%`, height: '100%', background: color, borderRadius: 3 }} />
+          </div>
+          <div style={{ fontSize: 'var(--fs-small)', fontWeight: 600, color: 'var(--gray500)', minWidth: 36, textAlign: 'right' }}>{fmtSecs(r.secs)}</div>
+        </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Section divider row ───────────────────────────────────────────────────────
 
-function SectionRow({ label }: { label: string }) {
+function SectionRow({ label, highlighted }: { label: string; highlighted?: boolean }) {
+  const hl = highlighted
+  const borderTop = hl ? '1.5px solid rgba(37,99,235,0.25)' : '1px solid var(--gray100)'
+  const bg = hl ? 'rgba(37,99,235,0.04)' : undefined
+  const color = hl ? 'var(--brand)' : 'var(--gray400)'
   return (
     <>
-      <div style={{
-        padding: '10px 20px 5px',
-        fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase',
-        letterSpacing: '0.08em', color: 'var(--gray400)',
-        borderTop: '1px solid var(--gray100)',
-      }}>{label}</div>
-      {/* divider cell */}
-      <div style={{ background: 'var(--gray150, #e8eaf0)', borderTop: '1px solid var(--gray100)' }} />
-      <div style={{
-        padding: '10px 20px 5px',
-        fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase',
-        letterSpacing: '0.08em', color: 'var(--gray400)',
-        borderTop: '1px solid var(--gray100)',
-      }}>{label}</div>
+      <div style={{ padding: '10px 20px 5px', fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color, borderTop, background: bg, display: 'flex', alignItems: 'center', gap: 6 }}>
+        {hl && <span style={{ width: 3, height: 13, background: 'var(--brand)', borderRadius: 2, flexShrink: 0, display: 'inline-block' }} />}
+        {label}
+      </div>
+      <div style={{ background: hl ? 'rgba(37,99,235,0.06)' : 'var(--gray150, #e8eaf0)', borderTop }} />
+      <div style={{ padding: '10px 20px 5px', fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color, borderTop, background: bg, display: 'flex', alignItems: 'center', gap: 6 }}>
+        {hl && <span style={{ width: 3, height: 13, background: 'var(--brand)', borderRadius: 2, flexShrink: 0, display: 'inline-block' }} />}
+        {label}
+      </div>
     </>
   )
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
+
+const SECTION_LABELS: Record<string, string> = {
+  stats: 'Summary Stats',
+  action_breakdown: 'Action Breakdown',
+  action_mix: 'Action Mix',
+  steps_per_page: 'Steps per Page',
+  page_revisits: 'Page Revisits',
+  session_variance: 'Session Variance',
+  time_per_action: 'Time per Action',
+}
 
 interface Props {
   agentSteps: AgentStep[]
@@ -265,9 +387,11 @@ interface Props {
   agentJourneys: JourneyResponse[]
   humanSessionStepCounts: number[]
   humanSessionCount: number
+  actionContext?: { highlight?: CompareHighlight; note?: string; explanation?: string } | null
+  onClearActionContext?: () => void
 }
 
-export default function ComparePanel({ agentSteps, humanSteps, agentJourneys, humanSessionStepCounts, humanSessionCount }: Props) {
+export default function ComparePanel({ agentSteps, humanSteps, agentJourneys, humanSessionStepCounts, humanSessionCount, actionContext, onClearActionContext }: Props) {
   const [splitPct, setSplitPct] = useState(80)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -296,7 +420,7 @@ export default function ComparePanel({ agentSteps, humanSteps, agentJourneys, hu
     const aiDurations = agentJourneys.map(j => {
       const steps = j.steps as AgentStep[]
       if (steps.length < 2) return null
-      return (steps[steps.length - 1].timestamp - steps[0].timestamp) / 1000
+      return (toMs(steps[steps.length - 1].timestamp) - toMs(steps[0].timestamp)) / 1000
     }).filter((d): d is number => d !== null)
     return {
       aiMedian: median(aiCounts), humanMedian: median(humanSessionStepCounts),
@@ -311,8 +435,31 @@ export default function ComparePanel({ agentSteps, humanSteps, agentJourneys, hu
       aiSteps: agentSteps.length, humanStepsTotal: humanSteps.length,
       aiIQR: (() => { const s = [...aiCounts].sort((a,b)=>a-b); return s.length >= 4 ? s[Math.floor(s.length*0.75)] - s[Math.floor(s.length*0.25)] : null })(),
       humanIQR: (() => { const s = [...humanSessionStepCounts].sort((a,b)=>a-b); return s.length >= 4 ? s[Math.floor(s.length*0.75)] - s[Math.floor(s.length*0.25)] : null })(),
+      aiTotalSecs: aiDurations.length > 0 ? aiDurations.reduce((a, b) => a + b, 0) : null,
+      humanTotalSecs: (() => {
+        let total = 0, off = 0
+        for (const c of humanSessionStepCounts) {
+          const seg = humanSteps.slice(off, off + c)
+          if (seg.length >= 2) { const d = (toMs(seg[seg.length - 1].timestamp) - toMs(seg[0].timestamp)) / 1000; if (d > 0) total += d }
+          off += c
+        }
+        return total > 0 ? total : null
+      })(),
     }
   }, [agentSteps, humanSteps, agentJourneys, humanSessionStepCounts, humanSessionCount])
+
+  // ── Highlight helpers ────────────────────────────────────────────────────────
+  const hl = actionContext?.highlight ?? null
+  const isHL = (section: string) => !!(hl?.sections?.includes(section as never))
+  const sideMatch = (side: 'ai' | 'human') => !hl?.side || hl.side === 'both' || hl.side === side
+  const cellBg = (section: string, side: 'ai' | 'human'): React.CSSProperties =>
+    isHL(section) && sideMatch(side) ? { background: 'rgba(37,99,235,0.04)' } : {}
+  const hlTypes = (section: string, side: 'ai' | 'human') =>
+    isHL(section) && sideMatch(side) ? hl?.action_types : undefined
+  const hlPages = (section: string, side: 'ai' | 'human') =>
+    isHL(section) && sideMatch(side) ? hl?.pages : undefined
+  const hlMetrics = (side: 'ai' | 'human') =>
+    isHL('stats') && sideMatch(side) ? hl?.metrics : undefined
 
   if (agentSteps.length === 0 && humanSteps.length === 0) {
     return (
@@ -464,7 +611,7 @@ export default function ComparePanel({ agentSteps, humanSteps, agentJourneys, hu
           </div>
 
           {/* Stats */}
-          <div style={{ padding: '0 20px 14px' }}>
+          <div style={{ padding: '0 20px 14px', ...cellBg('stats', 'ai') }}>
             <StatsGrid items={[
               { label: 'Median steps', value: fmt(stats.aiMedian, 0) },
               { label: 'Unique pages', value: String(stats.aiPages) },
@@ -472,10 +619,10 @@ export default function ComparePanel({ agentSteps, humanSteps, agentJourneys, hu
               { label: 'Scroll rate', value: stats.aiScrollPct !== null ? `${stats.aiScrollPct}%` : '—' },
               { label: 'Avg duration', value: stats.aiAvgDuration !== null ? `${fmt(stats.aiAvgDuration, 0)}s` : '—' },
               { label: 'Total steps', value: String(stats.aiSteps) },
-            ]} color={AI_COLOR} />
+            ]} color={AI_COLOR} highlightMetrics={hlMetrics('ai')} />
           </div>
           <div style={{ background: 'var(--border)' }} />
-          <div style={{ padding: '0 20px 14px' }}>
+          <div style={{ padding: '0 20px 14px', ...cellBg('stats', 'human') }}>
             <StatsGrid items={[
               { label: 'Median steps', value: fmt(stats.humanMedian, 0) },
               { label: 'Unique pages', value: stats.humanPages > 0 ? String(stats.humanPages) : '—' },
@@ -483,33 +630,44 @@ export default function ComparePanel({ agentSteps, humanSteps, agentJourneys, hu
               { label: 'Scroll rate', value: stats.humanScrollPct !== null ? `${stats.humanScrollPct}%` : '—' },
               { label: 'Avg steps', value: fmt(stats.humanAvg) },
               { label: 'Shared pages', value: String(stats.sharedPages) },
-            ]} color={HUMAN_COLOR} />
+            ]} color={HUMAN_COLOR} highlightMetrics={hlMetrics('human')} />
           </div>
 
-          <SectionRow label="Action breakdown" />
-          <div style={{ padding: '8px 20px 14px' }}><DonutChart steps={agentSteps} color={AI_COLOR} palette={AI_PALETTE} label="AI" /></div>
+          <SectionRow label="Action breakdown" highlighted={isHL('action_breakdown')} />
+          <div style={{ padding: '8px 20px 14px', ...cellBg('action_breakdown', 'ai') }}><DonutChart steps={agentSteps} color={AI_COLOR} palette={AI_PALETTE} label="AI" /></div>
           <div style={{ background: 'var(--border)' }} />
-          <div style={{ padding: '8px 20px 14px' }}><DonutChart steps={humanSteps} color={HUMAN_COLOR} palette={HUMAN_PALETTE} label="Human" /></div>
+          <div style={{ padding: '8px 20px 14px', ...cellBg('action_breakdown', 'human') }}><DonutChart steps={humanSteps} color={HUMAN_COLOR} palette={HUMAN_PALETTE} label="Human" /></div>
 
-          <SectionRow label="Action mix" />
-          <div style={{ padding: '8px 20px 14px' }}><ActionMixBars steps={agentSteps} color={AI_COLOR} /></div>
+          <SectionRow label="Action mix" highlighted={isHL('action_mix')} />
+          <div style={{ padding: '8px 20px 14px', ...cellBg('action_mix', 'ai') }}><ActionMixBars steps={agentSteps} color={AI_COLOR} highlightTypes={hlTypes('action_mix', 'ai')} /></div>
           <div style={{ background: 'var(--border)' }} />
-          <div style={{ padding: '8px 20px 14px' }}><ActionMixBars steps={humanSteps} color={HUMAN_COLOR} /></div>
+          <div style={{ padding: '8px 20px 14px', ...cellBg('action_mix', 'human') }}><ActionMixBars steps={humanSteps} color={HUMAN_COLOR} highlightTypes={hlTypes('action_mix', 'human')} /></div>
 
-          <SectionRow label="Steps per page" />
-          <div style={{ padding: '8px 20px 14px' }}><PageBarsChart steps={agentSteps} color={AI_COLOR} maxVal={sharedPageMax} /></div>
+          <SectionRow label="Steps per page" highlighted={isHL('steps_per_page')} />
+          <div style={{ padding: '8px 20px 14px', ...cellBg('steps_per_page', 'ai') }}><PageBarsChart steps={agentSteps} color={AI_COLOR} maxVal={sharedPageMax} highlightPages={hlPages('steps_per_page', 'ai')} /></div>
           <div style={{ background: 'var(--border)' }} />
-          <div style={{ padding: '8px 20px 14px' }}><PageBarsChart steps={humanSteps} color={HUMAN_COLOR} maxVal={sharedPageMax} /></div>
+          <div style={{ padding: '8px 20px 14px', ...cellBg('steps_per_page', 'human') }}><PageBarsChart steps={humanSteps} color={HUMAN_COLOR} maxVal={sharedPageMax} highlightPages={hlPages('steps_per_page', 'human')} /></div>
 
-          <SectionRow label="Page revisits — potential confusion" />
-          <div style={{ padding: '8px 20px 14px' }}><RevisitChart steps={agentSteps} color={AI_COLOR} maxVal={sharedRevisitMax} /></div>
+          <SectionRow label="Page revisits — potential confusion" highlighted={isHL('page_revisits')} />
+          <div style={{ padding: '8px 20px 14px', ...cellBg('page_revisits', 'ai') }}><RevisitChart steps={agentSteps} color={AI_COLOR} maxVal={sharedRevisitMax} highlightPages={hlPages('page_revisits', 'ai')} /></div>
           <div style={{ background: 'var(--border)' }} />
-          <div style={{ padding: '8px 20px 14px' }}><RevisitChart steps={humanSteps} color={HUMAN_COLOR} maxVal={sharedRevisitMax} /></div>
+          <div style={{ padding: '8px 20px 14px', ...cellBg('page_revisits', 'human') }}><RevisitChart steps={humanSteps} color={HUMAN_COLOR} maxVal={sharedRevisitMax} highlightPages={hlPages('page_revisits', 'human')} /></div>
 
-          <SectionRow label="Session variance" />
-          <div style={{ padding: '8px 20px 24px' }}><BoxPlot counts={agentStepCounts} color={AI_COLOR} maxVal={sharedStepMax} /></div>
+          <SectionRow label="Session variance" highlighted={isHL('session_variance')} />
+          <div style={{ padding: '8px 20px 14px', ...cellBg('session_variance', 'ai') }}><BoxPlot counts={agentStepCounts} color={AI_COLOR} maxVal={sharedStepMax} /></div>
           <div style={{ background: 'var(--border)' }} />
-          <div style={{ padding: '8px 20px 24px' }}><BoxPlot counts={humanSessionStepCounts} color={HUMAN_COLOR} maxVal={sharedStepMax} /></div>
+          <div style={{ padding: '8px 20px 14px', ...cellBg('session_variance', 'human') }}><BoxPlot counts={humanSessionStepCounts} color={HUMAN_COLOR} maxVal={sharedStepMax} /></div>
+
+          <SectionRow label="Time per action" highlighted={isHL('time_per_action')} />
+          <div style={{ padding: '8px 20px 14px', display: 'flex', flexDirection: 'column', gap: 8, ...cellBg('time_per_action', 'ai') }}>
+            <StatsGrid items={[{ label: 'Total time', value: stats.aiTotalSecs !== null ? fmtSecs(stats.aiTotalSecs) : '—' }]} color={AI_COLOR} />
+            <TimeActionBars steps={agentSteps} color={AI_COLOR} sessionCounts={agentJourneys.map(j => (j.steps as AgentStep[]).length)} highlightTypes={hlTypes('time_per_action', 'ai')} />
+          </div>
+          <div style={{ background: 'var(--border)' }} />
+          <div style={{ padding: '8px 20px 14px', display: 'flex', flexDirection: 'column', gap: 8, ...cellBg('time_per_action', 'human') }}>
+            <StatsGrid items={[{ label: 'Total time', value: stats.humanTotalSecs !== null ? fmtSecs(stats.humanTotalSecs) : '—' }]} color={HUMAN_COLOR} />
+            <TimeActionBars steps={humanSteps} color={HUMAN_COLOR} sessionCounts={humanSessionStepCounts} highlightTypes={hlTypes('time_per_action', 'human')} />
+          </div>
 
         </div>
       </div>
@@ -522,24 +680,107 @@ export default function ComparePanel({ agentSteps, humanSteps, agentJourneys, hu
         onMouseLeave={e => (e.currentTarget.style.background = 'var(--border)')}
       />
 
-      {/* ── RIGHT: insights ── */}
+      {/* ── RIGHT: action-point context or generic insights ── */}
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', background: 'var(--bg)', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--gray400)', marginBottom: 4 }}>
-          What the charts show
-        </div>
-        {insights.map((ins, i) => (
-          <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>{ins.title}</span>
-              {ins.tag && (
-                <span style={{ fontSize: 'var(--fs-small)', fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: 'var(--accent-soft)', color: 'var(--accent)' }}>
-                  {ins.tag}
-                </span>
-              )}
+        {actionContext ? (
+          <>
+            {/* back button */}
+            <button
+              onClick={onClearActionContext}
+              style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', fontSize: 'var(--fs-small)', color: 'var(--gray500)', fontWeight: 600, padding: '2px 0', marginBottom: 2 }}
+            >
+              ← All insights
+            </button>
+
+            {/* action point text */}
+            {actionContext.note && (
+              <div style={{ background: 'var(--surface)', border: '1.5px solid var(--brand)', borderRadius: 10, padding: '14px 16px' }}>
+                <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--brand)', marginBottom: 8 }}>Action Point</div>
+                <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)', lineHeight: 1.65 }}>{actionContext.note}</p>
+              </div>
+            )}
+
+            {/* diagram explanation */}
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px' }}>
+              <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-primary)', marginBottom: 8 }}>How this diagram connects</div>
+              {actionContext.explanation
+                ? <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)', lineHeight: 1.65 }}>{actionContext.explanation}</p>
+                : <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic', lineHeight: 1.65 }}>Look at the highlighted sections in the chart to see the evidence for this action point.</p>
+              }
             </div>
-            <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)', lineHeight: 1.65 }}>{ins.text}</p>
-          </div>
-        ))}
+
+            {/* what's highlighted */}
+            {hl && (hl.sections?.length || hl.action_types?.length || hl.pages?.length || hl.metrics?.length) ? (
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-primary)' }}>What's highlighted</div>
+                {hl.side && hl.side !== 'both' && (
+                  <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray500)' }}>
+                    Focus: <strong>{hl.side === 'ai' ? 'AI Agent' : 'Human'}</strong> column
+                  </p>
+                )}
+                {hl.sections?.length ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray500)', alignSelf: 'center' }}>Sections:</span>
+                    {hl.sections.map(s => (
+                      <span key={s} style={{ fontSize: 'var(--fs-small)', fontWeight: 600, padding: '2px 7px', borderRadius: 4, background: 'rgba(37,99,235,0.1)', color: 'var(--brand)' }}>
+                        {SECTION_LABELS[s] ?? s}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {hl.action_types?.length ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray500)', alignSelf: 'center' }}>Actions:</span>
+                    {hl.action_types.map(a => (
+                      <span key={a} style={{ fontSize: 'var(--fs-small)', fontWeight: 600, padding: '2px 7px', borderRadius: 4, background: 'var(--gray100)', color: 'var(--gray700)' }}>
+                        {a.replace(/_/g, ' ')}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {hl.pages?.length ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray500)', alignSelf: 'center' }}>Pages:</span>
+                    {hl.pages.map(p => (
+                      <span key={p} style={{ fontSize: 'var(--fs-small)', fontWeight: 600, fontFamily: 'monospace', padding: '2px 7px', borderRadius: 4, background: 'var(--gray100)', color: 'var(--gray700)' }}>
+                        {p}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {hl.metrics?.length ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray500)', alignSelf: 'center' }}>Metrics:</span>
+                    {hl.metrics.map(m => (
+                      <span key={m} style={{ fontSize: 'var(--fs-small)', fontWeight: 600, padding: '2px 7px', borderRadius: 4, background: 'var(--gray100)', color: 'var(--gray700)' }}>
+                        {METRIC_LABEL_MAP[m] ?? m}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--gray400)', marginBottom: 4 }}>
+              What the charts show
+            </div>
+            {insights.map((ins, i) => (
+              <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>{ins.title}</span>
+                  {ins.tag && (
+                    <span style={{ fontSize: 'var(--fs-small)', fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                      {ins.tag}
+                    </span>
+                  )}
+                </div>
+                <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)', lineHeight: 1.65 }}>{ins.text}</p>
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
     </div>

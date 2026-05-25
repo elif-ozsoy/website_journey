@@ -54,12 +54,12 @@ export default function MultiJourneyFlowMap({ agentJourneys, humanSessionSteps, 
           All Flows — {lanes.length} journey{lanes.length !== 1 ? 's' : ''}
         </span>
         <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 'var(--fs-small)', color: '#185FA5' }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#185FA5', display: 'inline-block' }} />
+          <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 'var(--fs-small)', color: '#32494B' }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#32494B', display: 'inline-block' }} />
             Agent
           </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 'var(--fs-small)', color: 'var(--teal)' }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--teal)', display: 'inline-block' }} />
+          <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 'var(--fs-small)', color: '#881342' }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#881342', display: 'inline-block' }} />
             Human
           </span>
         </span>
@@ -67,8 +67,8 @@ export default function MultiJourneyFlowMap({ agentJourneys, humanSessionSteps, 
 
       {lanes.map((lane, i) => {
         const isAgent = lane.kind === 'agent'
-        const dotColor = isAgent ? '#185FA5' : 'var(--teal)'
-        const bgTint = isAgent ? 'rgba(24,95,165,0.03)' : 'rgba(13,148,136,0.03)'
+        const dotColor = isAgent ? '#32494B' : '#881342'
+        const bgTint = isAgent ? 'rgba(50,73,75,0.04)' : 'rgba(136,19,66,0.04)'
 
         return (
           <div

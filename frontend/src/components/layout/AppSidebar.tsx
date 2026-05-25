@@ -91,9 +91,6 @@ function IcoHeatmap() {
   return <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="5" r="3.5" strokeOpacity="0.35"/><circle cx="5" cy="5" r="1.8" strokeOpacity="0.65"/><circle cx="5" cy="5" r="0.6" fill="currentColor" stroke="none"/><circle cx="11" cy="11" r="2.5" strokeOpacity="0.35"/><circle cx="11" cy="11" r="1.2" strokeOpacity="0.65"/><circle cx="11" cy="11" r="0.6" fill="currentColor" stroke="none"/></svg>
 }
 
-function IcoTrajectory() {
-  return <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="3" r="1.5"/><circle cx="13" cy="8" r="1.5"/><path d="M4.5 8.5 Q8 9 9.5 4.5"/><path d="M9.5 4 Q13 4 11.5 8"/></svg>
-}
 
 function IcoTimeline() {
   return <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.5l2.5 1.5"/></svg>
@@ -181,7 +178,7 @@ export default function AppSidebar() {
   const hostname = project?.url ? (() => { try { return new URL(project.url).hostname } catch { return '' } })() : ''
   const faviconUrl = hostname ? `https://www.google.com/s2/favicons?domain=${hostname}&sz=128` : null
 
-  const { runState, progress } = useAgentRun()
+  const { runState, progress, statusMsg, liveStepCount } = useAgentRun()
   const isRunning = runState === 'running' || runState === 'error'
 
   const user = getUser()
@@ -220,7 +217,6 @@ export default function AppSidebar() {
   const analysisViews = [
     { view: 'aggregate', label: 'Aggregate Journeys', icon: <IcoSankey /> },
     { view: 'heatmap', label: 'Heatmap', icon: <IcoHeatmap /> },
-    { view: 'details', label: 'Journey Flow', icon: <IcoTrajectory /> },
     { view: 'human_vs_ai', label: 'Human vs AI', icon: <IcoHumanVsAI /> },
     { view: 'time_event', label: 'Time-Event-Overview', icon: <IcoTimeline /> },
     { view: 'flow_sankey', label: 'Flow Diagram', icon: <IcoFlow /> },
@@ -324,12 +320,19 @@ export default function AppSidebar() {
         {isRunning && (
           <div style={{ padding: '8px 12px', flexShrink: 0 }}>
             {expanded && (
-              <div style={{ fontSize: 11, fontWeight: 600, color: runState === 'error' ? 'var(--red)' : 'var(--accent)', marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {runState === 'error' ? '⚠ Run stopped' : '⏳ Agent running…'}
-              </div>
+              <>
+                <div style={{ fontSize: 11, fontWeight: 600, color: runState === 'error' ? 'var(--red)' : 'var(--accent)', marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {runState === 'error' ? 'Run stopped' : statusMsg || 'Agent running…'}
+                </div>
+                {liveStepCount > 0 && runState !== 'error' && (
+                  <div style={{ fontSize: 10, color: 'var(--gray400)', marginBottom: 4 }}>
+                    Step {liveStepCount} · {progress}%
+                  </div>
+                )}
+              </>
             )}
             <div style={{ height: 3, borderRadius: 2, background: 'var(--gray100)', overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${progress}%`, background: runState === 'error' ? 'var(--red)' : 'var(--accent)', transition: 'width 0.4s' }} />
+              <div style={{ height: '100%', width: `${progress}%`, background: runState === 'error' ? 'var(--red)' : 'var(--accent)', transition: 'width 0.3s ease-out' }} />
             </div>
           </div>
         )}

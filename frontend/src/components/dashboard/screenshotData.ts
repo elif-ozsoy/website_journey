@@ -113,9 +113,9 @@ export function getScreenshotsFromAgentSteps(steps: AgentStep[]): ScreenshotData
         }
       })
 
-    // Build click heatmap dots from click_element steps
+    // Build click heatmap dots from click steps (browser-use stores as 'click', mapped events as 'click_element')
     const heatmapDots: HeatmapDot[] = pageSteps
-      .filter(s => s.action_type === 'click_element')
+      .filter(s => isAgentClick(s.action_type))
       .flatMap(s => {
         // element_coordinates are stored as percentages (0-100) — use directly
         if (s.element_coordinates) {
@@ -373,6 +373,12 @@ export function getScreenshotsFromSessionSteps(steps: AgentStep[], screenshotMet
     })
 }
 
+// Matches all click-like action types from both agent (browser-use) and human sessions
+function isAgentClick(actionType: string): boolean {
+  return actionType === 'click_element' || actionType === 'click'
+    || actionType === 'select_dropdown' || actionType === 'select_option'
+}
+
 function normalizeUrl(url: string): string {
   try {
     const u = new URL(url)
@@ -437,7 +443,7 @@ export function getAggregatedScreenshots(
     // Aggregate heatmap dots from all click events + VLM attention annotations
     const heatmapDots: HeatmapDot[] = [
       ...agentSteps
-        .filter(s => s.action_type === 'click_element')
+        .filter(s => isAgentClick(s.action_type))
         .flatMap(s => {
           // element_coordinates stored as percentages (0-100) — use directly
           if (s.element_coordinates) {

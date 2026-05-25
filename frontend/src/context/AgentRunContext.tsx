@@ -17,6 +17,7 @@ interface AgentRunContextValue {
   currentTaskIdx: number
   totalTasks: number
   statusMsg: string
+  runningTaskTitle: string
   errorMsg: string
   liveStepCount: number
   progress: number
@@ -87,17 +88,22 @@ export function AgentRunProvider({ children }: { children: ReactNode }) {
   const [currentTaskIdx, setCurrentTaskIdx] = useState(0)
   const [totalTasks, setTotalTasks] = useState(0)
   const [statusMsg, setStatusMsg] = useState('')
+  const [runningTaskTitle, setRunningTaskTitle] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
   const [liveStepCount, setLiveStepCount] = useState(0)
+  const [totalCompletedSteps, setTotalCompletedSteps] = useState(0)
   const [runningSiteId, setRunningSiteId] = useState<string | null>(null)
   const [runningVersionId, setRunningVersionId] = useState<string | null>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
   const isRunningRef = useRef(false)
 
+  // Use actual avg steps/task from completed tasks; fall back to 20 until data is available
+  const expectedPerTask = currentTaskIdx > 0 ? totalCompletedSteps / currentTaskIdx : 20
+  const withinTask = Math.min(liveStepCount / Math.max(expectedPerTask, 1), 0.95)
   const progress = runState === 'complete' ? 100
     : runState === 'idle' || totalTasks === 0 ? 0
-    : Math.round(((currentTaskIdx + Math.min(liveStepCount / 20, 0.9)) / totalTasks) * 100)
+    : Math.round(((currentTaskIdx + withinTask) / totalTasks) * 100)
 
   function stopRun() {
     isRunningRef.current = false
@@ -135,6 +141,7 @@ export function AgentRunProvider({ children }: { children: ReactNode }) {
     setTotalTasks(totalRuns)
     setCurrentTaskIdx(0)
     setLiveStepCount(0)
+    setTotalCompletedSteps(0)
     setStatusMsg('Initialising…')
 
     let runIdx = 0
@@ -145,6 +152,7 @@ export function AgentRunProvider({ children }: { children: ReactNode }) {
         const task = tasks[i]
         setCurrentTaskIdx(runIdx)
         setLiveStepCount(0)
+        setRunningTaskTitle(task.title)
         const agentLabel = agentRuns.length > 1 ? `${agentRun.name} — ` : ''
         setStatusMsg(`${agentLabel}Task ${i + 1}/${tasks.length} — ${task.title}`)
 
@@ -174,6 +182,7 @@ export function AgentRunProvider({ children }: { children: ReactNode }) {
             agentRun.persona,
           )
           allSteps.push(...steps)
+          setTotalCompletedSteps(prev => prev + steps.length)
         } catch (err) {
           if (!isRunningRef.current) return
           isRunningRef.current = false
@@ -204,7 +213,7 @@ export function AgentRunProvider({ children }: { children: ReactNode }) {
     <AgentRunContext.Provider value={{
       apiKey, setApiKey,
       provider, setProvider,
-      runState, currentTaskIdx, totalTasks, statusMsg, errorMsg, liveStepCount, progress,
+      runState, currentTaskIdx, totalTasks, statusMsg, runningTaskTitle, errorMsg, liveStepCount, progress,
       runningSiteId, runningVersionId,
       startRun, stopRun,
     }}>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
-import type { ComparativeAnalysis, TaskComparison, ScreenshotMeta, AnnotateResult, JourneyResponse, ActionPointItem } from '../../lib/api'
+import type { ComparativeAnalysis, TaskComparison, ScreenshotMeta, AnnotateResult, AnnotationPoint, JourneyResponse, ActionPointItem, DiagramRef } from '../../lib/api'
 import * as api from '../../lib/api'
 import type { AgentStep } from '../agent/agentTypes'
 
@@ -15,6 +15,7 @@ interface ActionPoint {
   task: TaskComparison
   status: PointStatus
   severity: 'high' | 'medium'
+  ppIndex: number
 }
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
@@ -27,7 +28,7 @@ function saveStatuses(siteId: string, s: Record<string, PointStatus>) {
   localStorage.setItem(STATUS_KEY(siteId), JSON.stringify(s))
 }
 
-const ANN_KEY = (s: string) => `ciphercorgi_annotations_${s}`
+const ANN_KEY = (s: string) => `ciphercorgi_annotations_v8_${s}`
 function loadAnnotations(siteId: string): Map<string, AnnotateResult> {
   try {
     const raw = localStorage.getItem(ANN_KEY(siteId))
@@ -50,19 +51,17 @@ function toItem(raw: ActionPointItem | string): ActionPointItem {
   return raw
 }
 
+
 function derivePoints(analysis: ComparativeAnalysis): Omit<ActionPoint, 'status'>[] {
   const pts: Omit<ActionPoint, 'status'>[] = []
   for (const task of analysis.task_analyses) {
     const diff = task.difficulty as 'high' | 'medium' | 'low'
     if (diff === 'low') continue
     const severity: 'high' | 'medium' = diff === 'high' ? 'high' : 'medium'
-    for (const raw of task.pain_points) {
-      const item = toItem(raw as ActionPointItem | string)
-      pts.push({ id: `pp_${task.task_title}_${item.text.slice(0, 40)}`, item, type: 'pain_point', task, severity })
-    }
-    for (const raw of task.recommendations) {
-      const item = toItem(raw as ActionPointItem | string)
-      pts.push({ id: `rec_${task.task_title}_${item.text.slice(0, 40)}`, item, type: 'recommendation', task, severity })
+    for (let i = 0; i < task.pain_points.length; i++) {
+      const item = toItem(task.pain_points[i] as ActionPointItem | string)
+      if (!item.text.trim()) continue
+      pts.push({ id: `pp_${task.task_title}_${i}`, item, type: 'pain_point', task, severity, ppIndex: i })
     }
   }
   return pts.sort((a, b) => {
@@ -71,35 +70,6 @@ function derivePoints(analysis: ComparativeAnalysis): Omit<ActionPoint, 'status'
   })
 }
 
-/** Return top-N screenshots ranked by how well the path matches the issue text. */
-function topScreenshots(shots: ScreenshotMeta[], text: string, n = 3): ScreenshotMeta[] {
-  if (shots.length === 0) return []
-  const words = text.toLowerCase().split(/\W+/).filter(w => w.length > 3)
-  const scored = shots.map(sc => {
-    const path = (sc.path ?? '').toLowerCase()
-    return { sc, score: words.filter(w => path.includes(w)).length }
-  })
-  scored.sort((a, b) => b.score - a.score)
-  return scored.slice(0, n).map(x => x.sc)
-}
-
-/**
- * Pick the best screenshot for display:
- * prefer the first candidate where the issue annotation returned found=true,
- * otherwise fall back to the top-ranked candidate.
- */
-function bestFoundShot(
-  candidates: ScreenshotMeta[],
-  pointId: string,
-  annotations: Map<string, AnnotateResult>,
-): ScreenshotMeta | null {
-  if (candidates.length === 0) return null
-  for (const sc of candidates) {
-    const ann = annotations.get(`issue:${pointId}:${sc.id}`)
-    if (ann?.found) return sc
-  }
-  return candidates[0]
-}
 
 function Label({ children }: { children: React.ReactNode }) {
   return <p style={{ margin: '0 0 4px', fontSize: 'var(--fs-small)', fontWeight: 700, color: 'var(--gray400)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{children}</p>
@@ -140,9 +110,13 @@ interface Props {
   humanJourneySteps: AgentStep[][]
   taskFilter: number | null
   tasks: { id: number; title: string }[]
-  onNavigateTo: (tab: string, view?: string, note?: string) => void
+  onNavigateTo: (tab: string, view?: string, note?: string, diagramRef?: DiagramRef) => void
   ratingsSummary: api.RatingsSummary | null
   compact?: boolean
+  analysisRunId?: number
+  /** Called whenever the action-point-specific screenshot or annotation changes.
+   *  pending=true means selection/annotation is still in progress. */
+  onScreenshotChange?: (screenshot: ScreenshotMeta | null, annotation: AnnotateResult | null, pending: boolean) => void
 }
 
 // ─── Diagram stats ────────────────────────────────────────────────────────────
@@ -208,26 +182,58 @@ export default function ActionPointsList({
   onRunAnalysis, onRerunAnalysis, agentJourneyIds,
   agentJourneys, humanJourneySteps,
   taskFilter, tasks, onNavigateTo, ratingsSummary, compact = false,
+  analysisRunId, onScreenshotChange,
 }: Props) {
   const [statuses, setStatuses] = useState<Record<string, PointStatus>>(() => loadStatuses(siteId))
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [allShots, setAllShots] = useState<ScreenshotMeta[]>([])
   const [shotsLoading, setShotsLoading] = useState(false)
-  // annotation per point: key = `${pointId}:${screenshotId}`
+  // AI-selected screenshot per point: key = pointId → screenshotId (null = no matching screenshot found)
+  const [selections, setSelections] = useState<Map<string, number | null>>(() => {
+    try {
+      return new Map(
+        Object.entries(JSON.parse(localStorage.getItem(`ciphercorgi_selections_v3_${siteId}`) ?? '{}')).map(
+          ([k, v]) => [k, v === null ? null : Number(v)]
+        )
+      )
+    } catch { return new Map() }
+  })
+  // annotation per point+screenshot: key = `${pointId}:${screenshotId}` → AnnotateResult
   const [annotations, setAnnotations] = useState<Map<string, AnnotateResult>>(() => loadAnnotations(siteId))
+  const selectingRef = useRef(new Set<string>())
   const annotatingRef = useRef(new Set<string>())
+
+  useEffect(() => {
+    if (!analysisRunId) return  // 0 = initial mount, don't clear cached data
+    setSelections(new Map())
+    setAnnotations(new Map())
+    selectingRef.current.clear()
+    annotatingRef.current.clear()
+    selQueueRef.current = []
+    annQueueRef.current = []
+    selActiveRef.current = 0
+    annActiveRef.current = 0
+    localStorage.removeItem(`ciphercorgi_selections_v3_${siteId}`)
+    localStorage.removeItem(ANN_KEY(siteId))
+  }, [analysisRunId])
 
   useEffect(() => { saveStatuses(siteId, statuses) }, [siteId, statuses])
   useEffect(() => { saveAnnotations(siteId, annotations) }, [siteId, annotations])
+  useEffect(() => {
+    try { localStorage.setItem(`ciphercorgi_selections_v3_${siteId}`, JSON.stringify(Object.fromEntries(selections))) } catch {}
+  }, [siteId, selections])
 
   useEffect(() => {
     if (agentJourneyIds.length === 0) return
     setShotsLoading(true)
+    console.log('[CC:shots] loading screenshots for journeys:', agentJourneyIds)
     Promise.all(agentJourneyIds.map(id => api.listJourneyScreenshots(id).catch(() => [] as ScreenshotMeta[])))
       .then(r => {
         const flat = r.flat().filter(sc => sc.ready)
         const seen = new Set<number>()
-        setAllShots(flat.filter(sc => { if (seen.has(sc.id)) return false; seen.add(sc.id); return true }))
+        const unique = flat.filter(sc => { if (seen.has(sc.id)) return false; seen.add(sc.id); return true })
+        console.log(`[CC:shots] loaded ${unique.length} unique screenshots:`, unique.map(s => `${s.id}:${s.path ?? '?'}`))
+        setAllShots(unique)
       })
       .finally(() => setShotsLoading(false))
   }, [agentJourneyIds.join(',')])
@@ -242,77 +248,130 @@ export default function ActionPointsList({
       setSelectedId(points[0].id)
   }, [points.length, activeTaskTitle])
 
-  // Serialised annotation queue — max 2 concurrent requests to avoid SSL connection pool corruption.
-  // Selected point's jobs are prepended so they resolve first.
-  const annQueueRef = useRef<Array<{ key: string; shotId: number; text: string }>>([])
-  const annActiveRef = useRef(0)
-  const MAX_CONCURRENT = 2
+  // Step 1: AI screenshot selection queue (max 2 concurrent)
+  // selText: pain-point description used to pick the right screenshot
+  // annText: recommendation text used to annotate WHERE the fix should be applied
+  const selQueueRef = useRef<Array<{ pointId: string; selText: string; annText: string; shotIds: number[] }>>([])
+  const selActiveRef = useRef(0)
 
-  function drainQueue(
-    setAnn: React.Dispatch<React.SetStateAction<Map<string, AnnotateResult>>>,
-  ) {
-    while (annActiveRef.current < MAX_CONCURRENT && annQueueRef.current.length > 0) {
-      const job = annQueueRef.current.shift()!
-      annActiveRef.current++
-      api.annotateScreenshot(job.shotId, job.text)
-        .then(r => setAnn(m => new Map(m).set(job.key, r)))
-        .catch(() => setAnn(m => new Map(m).set(job.key, { x: 0, y: 0, width: 0, height: 0, found: false })))
+  function drainSelQueue() {
+    while (selActiveRef.current < 1 && selQueueRef.current.length > 0) {
+      const job = selQueueRef.current.shift()!
+      selActiveRef.current++
+      console.log(`[CC:sel] START ${job.pointId} | candidates: ${job.shotIds.length} shots | text: "${job.selText.slice(0, 60)}"`)
+      api.selectScreenshot(job.shotIds, job.selText)
+        .then(r => {
+          const shotId = r.screenshot_id  // null = model found no matching screenshot
+          console.log(`[CC:sel] DONE  ${job.pointId} → shotId: ${shotId}`)
+          setSelections(m => new Map(m).set(job.pointId, shotId))
+          if (shotId !== null) enqueueAnnotation(job.pointId, shotId, job.annText, false)
+          else console.warn(`[CC:sel] NO MATCH for ${job.pointId} — no annotation will run`)
+        })
+        .catch((err) => {
+          // Network/API failure — fall back to first candidate so we still show something
+          const shotId = job.shotIds[0]
+          console.warn(`[CC:sel] ERROR ${job.pointId}:`, err, `→ fallback shotId: ${shotId}`)
+          setSelections(m => new Map(m).set(job.pointId, shotId))
+          enqueueAnnotation(job.pointId, shotId, job.annText, false)
+        })
         .finally(() => {
-          annotatingRef.current.delete(job.key)
-          annActiveRef.current--
-          drainQueue(setAnn)
+          selectingRef.current.delete(job.pointId)
+          selActiveRef.current--
+          drainSelQueue()
         })
     }
   }
 
-  function enqueue(
-    jobs: Array<{ key: string; shotId: number; text: string }>,
-    prepend: boolean,
-    setAnn: React.Dispatch<React.SetStateAction<Map<string, AnnotateResult>>>,
-    existingKeys: Set<string>,
-  ) {
-    const fresh = jobs.filter(j => !existingKeys.has(j.key) && !annotatingRef.current.has(j.key))
-    if (fresh.length === 0) return
-    fresh.forEach(j => annotatingRef.current.add(j.key))
-    if (prepend) annQueueRef.current.unshift(...fresh)
-    else annQueueRef.current.push(...fresh)
-    drainQueue(setAnn)
+  // Step 2: annotation queue (max 2 concurrent)
+  const annQueueRef = useRef<Array<{ key: string; shotId: number; text: string }>>([])
+  const annActiveRef = useRef(0)
+
+  function drainAnnQueue() {
+    while (annActiveRef.current < 1 && annQueueRef.current.length > 0) {
+      const job = annQueueRef.current.shift()!
+      annActiveRef.current++
+      console.log(`[CC:ann] START ${job.key} | shotId: ${job.shotId} | text: "${job.text.slice(0, 60)}"`)
+      api.annotateScreenshot(job.shotId, job.text)
+        .then(r => {
+          console.log(`[CC:ann] API   ${job.key} → found: ${r.found}, points: ${r.points.length}`, r.points.map(p => `(${p.x.toFixed(0)},${p.y.toFixed(0)}) "${p.label.slice(0, 40)}"`))
+          // If backend returned no points, synthesise a fallback center dot so
+          // the UI always shows at least one annotation marker.
+          if (!r.found || r.points.length === 0) {
+            const label = job.text.slice(0, 80) + (job.text.length > 80 ? '…' : '')
+            console.warn(`[CC:ann] FALLBACK ${job.key} (found=${r.found}, pts=${r.points.length}) → center dot`)
+            r = { found: true, points: [{ x: 50, y: 40, label }], x: 50, y: 40, width: 0.1, height: 0.05 }
+          }
+          setAnnotations(m => new Map(m).set(job.key, r))
+        })
+        .catch((err) => {
+          // API error — synthesise fallback rather than storing permanent "no dot"
+          console.error(`[CC:ann] ERROR ${job.key}:`, err, '→ center fallback dot')
+          const label = job.text.slice(0, 80) + (job.text.length > 80 ? '…' : '')
+          setAnnotations(m => new Map(m).set(job.key, {
+            found: true, points: [{ x: 50, y: 40, label }], x: 50, y: 40, width: 0.1, height: 0.05,
+          }))
+        })
+        .finally(() => {
+          annotatingRef.current.delete(job.key)
+          annActiveRef.current--
+          drainAnnQueue()
+        })
+    }
   }
 
-  // Re-queue when shots or points change
+  function enqueueAnnotation(pointId: string, shotId: number, text: string, prepend: boolean) {
+    const key = `${pointId}:${shotId}`
+    if (annotations.has(key)) {
+      console.log(`[CC:ann] SKIP  ${key} (already in cache)`)
+      return
+    }
+    if (annotatingRef.current.has(key)) {
+      console.log(`[CC:ann] SKIP  ${key} (already in-flight)`)
+      return
+    }
+    console.log(`[CC:ann] QUEUE ${key} | prepend: ${prepend}`)
+    annotatingRef.current.add(key)
+    if (prepend) annQueueRef.current.unshift({ key, shotId, text })
+    else annQueueRef.current.push({ key, shotId, text })
+    drainAnnQueue()
+  }
+
+  // Return the text used to annotate the screenshot: the pain-point description itself.
+  // Recommendations are a separate, independently-indexed list and are NOT paired to pain_points by index.
+  function annTextFor(p: ActionPoint): string {
+    return p.item.text
+  }
+
+  // Kick off selection for points without a selected screenshot
   useEffect(() => {
     if (allShots.length === 0 || points.length === 0) return
-    setAnnotations(prev => {
-      const existing = new Set(prev.keys())
-      const jobs: Array<{ key: string; shotId: number; text: string }> = []
-      for (const p of points.slice(0, 20)) {
-        const candidates = topScreenshots(allShots, p.item.text, 3)
-        const fixText = p.type === 'pain_point' ? (toItem(p.task.recommendations[0] as ActionPointItem | string).text ?? '') : p.item.text
-        for (const sc of candidates) jobs.push({ key: `issue:${p.id}:${sc.id}`, shotId: sc.id, text: p.item.text })
-        if (fixText && candidates[0]) jobs.push({ key: `fix:${p.id}:${candidates[0].id}`, shotId: candidates[0].id, text: fixText })
+    for (const p of points.slice(0, 20)) {
+      if (selections.has(p.id)) {
+        const shotId = selections.get(p.id) ?? null
+        if (shotId !== null) enqueueAnnotation(p.id, shotId, annTextFor(p), false)
+        continue
       }
-      enqueue(jobs, false, setAnnotations, existing)
-      return prev
-    })
-  }, [allShots.length, points.map(p => p.id).join(',')])
+      if (selectingRef.current.has(p.id)) continue  // selection in progress
+      selectingRef.current.add(p.id)
+      selQueueRef.current.push({ pointId: p.id, selText: p.item.text, annText: annTextFor(p), shotIds: allShots.map(s => s.id) })
+    }
+    drainSelQueue()
+  }, [allShots.length, points.map(p => p.id).join(','), analysisRunId])
 
-  // Prioritise selected point
+  // Prioritise selected point: move it to front of queues
   useEffect(() => {
     if (!selectedId || allShots.length === 0) return
     const p = points.find(pt => pt.id === selectedId)
     if (!p) return
-    setAnnotations(prev => {
-      const existing = new Set(prev.keys())
-      const candidates = topScreenshots(allShots, p.item.text, 3)
-      const fixText = p.type === 'pain_point' ? (toItem(p.task.recommendations[0] as ActionPointItem | string).text ?? '') : p.item.text
-      const jobs: Array<{ key: string; shotId: number; text: string }> = [
-        ...candidates.map(sc => ({ key: `issue:${p.id}:${sc.id}`, shotId: sc.id, text: p.item.text })),
-        ...(fixText && candidates[0] ? [{ key: `fix:${p.id}:${candidates[0].id}`, shotId: candidates[0].id, text: fixText }] : []),
-      ]
-      enqueue(jobs, true, setAnnotations, existing)
-      return prev
-    })
-  }, [selectedId, allShots.length])
+    if (selections.has(p.id)) {
+      const shotId = selections.get(p.id) ?? null
+      if (shotId !== null) enqueueAnnotation(p.id, shotId, annTextFor(p), true)
+    } else if (!selectingRef.current.has(p.id)) {
+      selectingRef.current.add(p.id)
+      selQueueRef.current.unshift({ pointId: p.id, selText: p.item.text, annText: annTextFor(p), shotIds: allShots.map(s => s.id) })
+      drainSelQueue()
+    }
+  }, [selectedId, allShots.length, analysisRunId])
 
   function setStatus(id: string, s: PointStatus) { setStatuses(prev => ({ ...prev, [id]: s })) }
   function advance() {
@@ -322,8 +381,28 @@ export default function ActionPointsList({
   }
 
   const selected = points.find(p => p.id === selectedId) ?? null
-  const doneCount = points.filter(p => statuses[p.id] === 'done').length
   const openCount = points.filter(p => (statuses[p.id] ?? 'open') === 'open').length
+
+  // Compute the exact screenshot + annotation for the currently selected point.
+  // Using these as effect deps means the callback fires only when THIS point's
+  // data changes — not on every unrelated annotation completing.
+  const selectedShotId = selected ? (selections.get(selected.id) ?? null) : null
+  const selectedSc = selectedShotId !== null ? (allShots.find(s => s.id === selectedShotId) ?? null) : null
+  const selectedAnn = (selected && selectedShotId !== null)
+    ? (annotations.get(`${selected.id}:${selectedShotId}`) ?? null)
+    : null
+  // pending = selection hasn't completed yet, OR screenshot found but annotation still running
+  const selectedPending = selected
+    ? (!selections.has(selected.id) || (selectedShotId !== null && !annotations.has(`${selected.id}:${selectedShotId}`)))
+    : false
+
+  useEffect(() => {
+    console.log(
+      `[CC:cb] onScreenshotChange | sc: ${selectedSc?.id ?? 'null'} | ann: ${selectedAnn ? `found=${selectedAnn.found} pts=${selectedAnn.points.length}` : 'null'} | pending: ${selectedPending}`
+    )
+    onScreenshotChange?.(selectedSc, selectedAnn, selectedPending)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSc, selectedAnn, selectedPending])
 
   // Compute diagram stats for the selected point's task
   const selectedStats = useMemo(() =>
@@ -331,8 +410,10 @@ export default function ActionPointsList({
     [selected?.task.task_title, agentJourneys, humanJourneySteps],
   )
   const pendingAnnotations = points.slice(0, 10).filter(p => {
-    const candidates = topScreenshots(allShots, p.item.text, 3)
-    return candidates.length > 0 && candidates.every(sc => !annotations.has(`issue:${p.id}:${sc.id}`))
+    if (!selections.has(p.id)) return true
+    const shotId = selections.get(p.id) ?? null
+    if (shotId === null) return false  // no match — not pending
+    return !annotations.has(`${p.id}:${shotId}`)
   }).length
 
   // ── Empty state ───────────────────────────────────────────────────────────
@@ -368,7 +449,7 @@ export default function ActionPointsList({
       <div style={{ padding: '8px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--gray50)', flexWrap: 'wrap' }}>
         <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)', flexShrink: 0 }}>Action Points</span>
 
-        {openCount === 0 && points.length > 0 && <span style={{ fontSize: 'var(--fs-small)', color: 'var(--green)', fontWeight: 600, flexShrink: 0 }}>all resolved ✓</span>}
+        {openCount === 0 && points.length > 0 && <span style={{ fontSize: 'var(--fs-small)', color: 'var(--accent)', fontWeight: 600, flexShrink: 0 }}>all resolved ✓</span>}
         {pendingAnnotations > 0 && allShots.length > 0 && (
           <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', color: 'var(--gray400)', flexShrink: 0 }}>
             <Spinner size={9} /> Locating issues…
@@ -399,27 +480,34 @@ export default function ActionPointsList({
         <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : '55% 1fr', flex: 1, minHeight: 0, overflow: 'hidden' }}>
 
           {!compact && (() => {
-            const candidates = allShots.length > 0 ? topScreenshots(allShots, selected.item.text, 3) : []
-            const sc = bestFoundShot(candidates, selected.id, annotations)
-            const issueAnn = sc ? (annotations.get(`issue:${selected.id}:${sc.id}`) ?? null) : null
-            const fixAnn = sc ? (annotations.get(`fix:${selected.id}:${sc.id}`) ?? null) : null
-            const issuePending = candidates.length > 0 && candidates.every(c => !annotations.has(`issue:${selected.id}:${c.id}`))
-            const fixText = selected.type === 'pain_point' ? (toItem(selected.task.recommendations[0] as ActionPointItem | string).text ?? '') : ''
+            const rawShotId = selections.get(selected.id)  // undefined = not yet selected, null = no match
+            const shotId = rawShotId ?? null
+            const noMatch = selections.has(selected.id) && shotId === null
+            const sc = shotId !== null ? (allShots.find(s => s.id === shotId) ?? null) : null
+            const ann = shotId !== null ? (annotations.get(`${selected.id}:${shotId}`) ?? null) : null
+            const pending = !selections.has(selected.id) || (shotId !== null && !annotations.has(`${selected.id}:${shotId}`))
             return (
               <div style={{ borderRight: '1px solid var(--border)', background: '#0f172a', position: 'relative', minHeight: 480 }}>
                 {shotsLoading ? (
                   <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <Spinner size={20} />
                   </div>
+                ) : noMatch ? (
+                  <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#475569' }}>
+                    <span style={{ fontSize: 'var(--fs-headline)', opacity: 0.35 }}>🖼</span>
+                    <span style={{ fontSize: 'var(--fs-small)' }}>No matching screenshot for this action point</span>
+                  </div>
                 ) : sc ? (
                   <ScreenshotView
                     screenshot={sc}
-                    issueAnnotation={issueAnn}
-                    fixAnnotation={fixAnn}
-                    issueText={selected.item.text}
-                    fixText={fixText}
-                    pending={issuePending}
+                    annotation={ann}
+                    pending={pending}
                   />
+                ) : pending ? (
+                  <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: '#475569' }}>
+                    <Spinner size={20} />
+                    <span style={{ fontSize: 'var(--fs-small)' }}>Selecting screenshot…</span>
+                  </div>
                 ) : (
                   <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#475569' }}>
                     <span style={{ fontSize: 'var(--fs-headline)', opacity: 0.35 }}>🖼</span>
@@ -455,14 +543,13 @@ export default function ActionPointsList({
 
 // ─── Screenshot with annotation overlay ──────────────────────────────────────
 
-function AnnotationDot({ ann, label, color, tooltipText }: {
-  ann: AnnotateResult; label: string; color: string; tooltipText: string
-}) {
+// Project palette: red → brand blue → amber → accent-bright → deeper blue
+const DOT_PALETTE = ['#C73E1D', '#185FA5', '#d97706', '#378ADD']
+
+function AnnotationDot({ point, dotIndex = 0 }: { point: AnnotationPoint; dotIndex?: number }) {
   const [open, setOpen] = useState(false)
-  const cx = (ann.x + ann.width / 2) * 100
-  const cy = (ann.y + ann.height / 2) * 100
-  // Place tooltip above the dot; flip to below if too close to the top
-  const above = ann.y > 0.15
+  const color = DOT_PALETTE[dotIndex % DOT_PALETTE.length]
+  const above = point.y > 15
 
   return (
     <div
@@ -470,30 +557,18 @@ function AnnotationDot({ ann, label, color, tooltipText }: {
       onClick={() => setOpen(o => !o)}
       style={{
         position: 'absolute',
-        left: `${cx}%`, top: `${cy}%`,
+        left: `${point.x}%`, top: `${point.y}%`,
         transform: 'translate(-50%,-50%)',
         zIndex: 10, cursor: 'pointer',
       }}
     >
-      {/* Dot */}
       <div style={{
         width: 16, height: 16, borderRadius: '50%',
         background: color,
         border: '2.5px solid #fff',
         boxShadow: `0 0 0 3px ${color}55, 0 2px 8px rgba(0,0,0,0.5)`,
-        transition: 'transform 0.1s',
       }} />
 
-      {/* Small letter badge */}
-      <div style={{
-        position: 'absolute', top: -5, right: -5,
-        width: 10, height: 10, borderRadius: '50%',
-        background: '#fff', color, fontSize: 'var(--fs-small)', fontWeight: 900,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        lineHeight: 1, pointerEvents: 'none',
-      }}>{label}</div>
-
-      {/* Tooltip */}
       {open && (
         <div style={{
           position: 'absolute',
@@ -507,14 +582,12 @@ function AnnotationDot({ ann, label, color, tooltipText }: {
           zIndex: 20, pointerEvents: 'none',
           whiteSpace: 'normal',
         }}>
-          <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label === '!' ? 'Issue' : 'Suggested fix'}</div>
-          {tooltipText}
-          {/* Arrow */}
+          {point.label}
           <div style={{
-            position: 'absolute',
-            left: '50%', transform: 'translateX(-50%)',
-            ...(above ? { bottom: -5, borderTop: `5px solid #0f172a`, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderBottom: 'none' }
-                       : { top: -5, borderBottom: `5px solid #0f172a`, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: 'none' }),
+            position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+            ...(above
+              ? { bottom: -5, borderTop: `5px solid #0f172a`, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderBottom: 'none' }
+              : { top: -5, borderBottom: `5px solid #0f172a`, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: 'none' }),
             width: 0, height: 0,
           }} />
         </div>
@@ -523,12 +596,9 @@ function AnnotationDot({ ann, label, color, tooltipText }: {
   )
 }
 
-function ScreenshotView({ screenshot, issueAnnotation, fixAnnotation, issueText, fixText, pending }: {
+function ScreenshotView({ screenshot, annotation, pending }: {
   screenshot: ScreenshotMeta
-  issueAnnotation: AnnotateResult | null
-  fixAnnotation: AnnotateResult | null
-  issueText: string
-  fixText: string
+  annotation: AnnotateResult | null
   pending: boolean
 }) {
   return (
@@ -539,7 +609,6 @@ function ScreenshotView({ screenshot, issueAnnotation, fixAnnotation, issueText,
         style={{ width: '100%', height: 'auto', display: 'block', opacity: 0.9 }}
       />
 
-      {/* Scanning shimmer while locating */}
       {pending && (
         <div style={{
           position: 'absolute', inset: 0, pointerEvents: 'none',
@@ -548,17 +617,10 @@ function ScreenshotView({ screenshot, issueAnnotation, fixAnnotation, issueText,
         }} />
       )}
 
-      {/* Issue dot — red, shows issue text on click */}
-      {issueAnnotation?.found && (
-        <AnnotationDot ann={issueAnnotation} label="!" color="#ef4444" tooltipText={issueText} />
-      )}
+      {annotation?.found && annotation.points.map((pt, i) => (
+        <AnnotationDot key={i} point={pt} dotIndex={i} />
+      ))}
 
-      {/* Fix dot — blue, shows suggested action on click */}
-      {fixAnnotation?.found && fixText && (
-        <AnnotationDot ann={fixAnnotation} label="✓" color="#2563eb" tooltipText={fixText} />
-      )}
-
-      {/* Path + pending labels */}
       <div style={{ position: 'absolute', bottom: 8, left: 8, right: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', pointerEvents: 'none' }}>
         {screenshot.path && (
           <div style={{ background: 'rgba(15,23,42,0.72)', color: '#94a3b8', fontSize: 'var(--fs-small)', fontFamily: 'var(--font-sans)', padding: '2px 7px', borderRadius: 5 }}>
@@ -666,11 +728,13 @@ function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJou
   humanJourneySteps: AgentStep[][]
   ratingsSummary: api.RatingsSummary | null
   onDone: () => void; onSkip: () => void; onPrev: () => void; onNext: () => void
-  onNavigateTo: (tab: string, view?: string, note?: string) => void
+  onNavigateTo: (tab: string, view?: string, note?: string, diagramRef?: DiagramRef) => void
   compact?: boolean
 }) {
   const isPain = point.type === 'pain_point'
-  const relevantRec = isPain ? toItem(point.task.recommendations[0] as ActionPointItem | string) : null
+  const relevantRec = isPain && point.task.recommendations[point.ppIndex]
+    ? toItem(point.task.recommendations[point.ppIndex] as ActionPointItem | string)
+    : null
   const derivation = derivationSummary(point.task, stats)
   const diagrams = point.item.diagrams ?? []
 
@@ -740,8 +804,8 @@ function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJou
         {point.item.type && (() => {
           const badgeMap = {
             ux_issue:     { label: 'UX Issue',    bg: '#fee2e2', color: '#b91c1c' },
-            agent_gap:    { label: 'Agent Gap',   bg: '#dbeafe', color: '#1d4ed8' },
-            human_issue:  { label: 'Human Issue', bg: '#fef9c3', color: '#92400e' },
+            agent_gap:    { label: 'Agent Gap',   bg: '#e0ecee', color: '#32494B' },
+            human_issue:  { label: 'Human Issue', bg: '#f7d5e2', color: '#881342' },
           }
           const b = badgeMap[point.item.type]
           return b ? (
@@ -866,7 +930,7 @@ function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJou
                 <button
                   key={d.view}
                   title={d.reason}
-                  onClick={() => onNavigateTo('views', d.view, note)}
+                  onClick={() => onNavigateTo('views', d.view, note, d)}
                   style={{
                     display: 'inline-flex', alignItems: 'center', gap: 4,
                     padding: '4px 10px', height: 28, borderRadius: 99,

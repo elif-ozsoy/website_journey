@@ -230,9 +230,19 @@ export function getSiteSimilarity(siteId: string, taskId?: number) {
   return request<JourneySimilarityItem[]>(`/v1/sites/${siteId}/similarity${qs}`)
 }
 
+export interface CompareHighlight {
+  sections?: Array<'stats' | 'action_breakdown' | 'action_mix' | 'steps_per_page' | 'page_revisits' | 'session_variance' | 'time_per_action'>
+  side?: 'ai' | 'human' | 'both'
+  metrics?: Array<'median_steps' | 'unique_pages' | 'click_rate' | 'scroll_rate' | 'avg_duration' | 'total_steps' | 'avg_steps' | 'shared_pages'>
+  action_types?: Array<'click_element' | 'input_text' | 'scroll' | 'navigate' | 'extract_content' | 'other'>
+  pages?: string[]
+}
+
 export interface DiagramRef {
   view: 'compare' | 'sankey' | 'heatmap' | 'multiflow' | 'similarity' | 'comparative' | 'insights' | 'policy' | 'human_agg'
   reason: string
+  highlight?: CompareHighlight
+  diagram_explanation?: string
 }
 
 export interface ActionPointItem {
@@ -339,14 +349,28 @@ export function explainHuman(
   })
 }
 
+export interface AnnotationPoint {
+  x: number; y: number; label: string
+}
+
 export interface AnnotateResult {
-  x: number; y: number; width: number; height: number; found: boolean
+  found: boolean
+  points: AnnotationPoint[]
+  // legacy
+  x: number; y: number; width: number; height: number
 }
 
 export function annotateScreenshot(screenshotId: number, issueText: string) {
   return request<AnnotateResult>('/v1/annotate-screenshot', {
     method: 'POST',
     body: JSON.stringify({ screenshot_id: screenshotId, issue_text: issueText }),
+  })
+}
+
+export function selectScreenshot(screenshotIds: number[], issueText: string) {
+  return request<{ screenshot_id: number | null }>('/v1/select-screenshot', {
+    method: 'POST',
+    body: JSON.stringify({ screenshot_ids: screenshotIds, issue_text: issueText }),
   })
 }
 

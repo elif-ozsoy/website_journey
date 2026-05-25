@@ -8,8 +8,8 @@ interface Props {
   humanJourneys?: AgentStep[][]
 }
 
-const AGENT_COLOR  = '#185FA5'
-const HUMAN_COLOR  = '#0d9488'
+const AGENT_COLOR  = '#32494B'
+const HUMAN_COLOR  = '#881342'
 const BOTH_COLOR   = '#1e293b'
 const MARGIN = { top: 28, right: 200, bottom: 20, left: 20 }
 
