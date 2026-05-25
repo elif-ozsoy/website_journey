@@ -260,9 +260,6 @@ export default function DashboardPage() {
     targetView: ActiveView
   } | null>(null)
 
-  // Only expose context when the user is on the view it was set for
-  const activeCompareContext = compareContext?.targetView === activeView ? compareContext : null
-
   const [agentFilter, setAgentFilter] = useState<Set<string> | null>(null)
   const [sessionFilter, setSessionFilter] = useState<Set<string> | null>(null)
   const [sankeyDivergences, setSankeyDivergences] = useState<NodeDivergence[]>([])
@@ -272,6 +269,9 @@ export default function DashboardPage() {
   const urlView = searchParams.get('view') ?? 'overview'
   const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'human_vs_ai', 'time_event', 'horizon_graph', 'flow_sankey'] as ActiveView[]).includes(urlView as ActiveView)    ? (urlView as ActiveView)
     : 'overview'
+
+  // Only expose context when the user is on the view it was set for (must be after activeView)
+  const activeCompareContext = compareContext?.targetView === activeView ? compareContext : null
 
 
 
