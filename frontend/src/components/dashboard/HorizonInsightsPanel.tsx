@@ -108,6 +108,7 @@ export default function HorizonInsightsPanel({
       const severity: 'high' | 'medium' = task.difficulty === 'high' ? 'high' : 'medium'
       for (const raw of [...task.pain_points, ...task.recommendations]) {
         const item = raw as ActionPointItem
+        if (!item.diagrams?.some(d => d.view === 'horizon')) continue
         pts.push({
           id: `horizon::${task.task_title}::${item.text.slice(0, 40)}`,
           text: item.text,

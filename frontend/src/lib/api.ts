@@ -288,7 +288,7 @@ export interface CompareHighlight {
 }
 
 export interface DiagramRef {
-  view: 'compare' | 'sankey' | 'heatmap' | 'multiflow' | 'similarity' | 'comparative' | 'insights' | 'policy' | 'human_agg'
+  view: 'compare' | 'sankey' | 'heatmap' | 'multiflow' | 'similarity' | 'comparative' | 'insights' | 'policy' | 'human_agg' | 'horizon'
   reason: string
   highlight?: CompareHighlight
   diagram_explanation?: string

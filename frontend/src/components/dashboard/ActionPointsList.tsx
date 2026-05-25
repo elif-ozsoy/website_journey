@@ -712,6 +712,7 @@ function relevantHumanNarratives(humanJourneySteps: AgentStep[][], pointText: st
 const DIAGRAM_LABELS: Record<string, string> = {
   compare: 'AI vs Human',
   sankey: 'Journey Flow',
+  horizon: 'Horizon Graph',
   heatmap: 'Page Heatmap',
   multiflow: 'All Flows',
   similarity: 'Journey Similarity',
@@ -926,11 +927,16 @@ function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJou
             {diagrams.map((d) => {
               const label = DIAGRAM_LABELS[d.view] ?? d.view
               const note = `Action point: "${point.item.text.slice(0, 100)}${point.item.text.length > 100 ? '…' : ''}" · Task: ${point.task.task_title} · Evidence: ${d.reason}`
+              const derivedSide = point.item.type === 'agent_gap' ? 'ai' : point.item.type === 'human_issue' ? 'human' : undefined
+              const enriched: DiagramRef = {
+                ...d,
+                highlight: { ...d.highlight, side: d.highlight?.side ?? derivedSide },
+              }
               return (
                 <button
                   key={d.view}
                   title={d.reason}
-                  onClick={() => onNavigateTo('views', d.view, note, d)}
+                  onClick={() => onNavigateTo('views', d.view, note, enriched)}
                   style={{
                     display: 'inline-flex', alignItems: 'center', gap: 4,
                     padding: '4px 10px', height: 28, borderRadius: 99,

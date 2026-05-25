@@ -274,6 +274,7 @@ export default function DashboardPage() {
   const DIAGRAM_VIEW_MAP: Partial<Record<string, ActiveView>> = {
     compare: 'human_vs_ai',
     sankey: 'flow_sankey',
+    horizon: 'horizon_graph',
     heatmap: 'heatmap',
     multiflow: 'aggregate',
     human_agg: 'aggregate',
