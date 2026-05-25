@@ -273,7 +273,7 @@ const MILESTONE_CODE: Record<Milestone, string> = {
 /* Special colors for terminal milestones. Override nodeColor() and pattern-
  * chip background for these. */
 const TERMINAL_COLORS: Partial<Record<Milestone, string>> = {
-  'done': '#16a34a',        // green
+  'done': '#027b2ebe',        // green
   'failed': '#dc2626',      // red
   'incomplete': '#f59e0b',  // amber
   'detail-view': '#3c1580',  
