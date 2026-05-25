@@ -12,25 +12,7 @@ interface Props {
   tasks?: Task[]
 }
 
-function FilterPill({ label, active, color, onClick }: { label: string; active: boolean; color: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4,
-        padding: '3px 9px', borderRadius: 999, cursor: 'pointer', border: 'none',
-        fontSize: 'var(--fs-small)', fontWeight: 600, fontFamily: 'var(--font-sans)',
-        background: active ? color : 'var(--gray100)',
-        color: active ? '#fff' : 'var(--text-secondary)',
-        transition: 'background 0.13s, color 0.13s',
-        whiteSpace: 'nowrap',
-        flexShrink: 0,
-      }}
-    >
-      {label}
-    </button>
-  )
-}
+const CHEVRON_SVG = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236b7280' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`
 
 export default function HeatmapCarousel({ agentJourneys, humanJourneysBySession, loading, tasks = [] }: Props) {
   const [pageIdx, setPageIdx] = useState(0)
@@ -41,17 +23,8 @@ export default function HeatmapCarousel({ agentJourneys, humanJourneysBySession,
   const [taskFilter, setTaskFilter] = useState<number | null>(null)
   useEffect(() => {
     if (tasks.length > 0 && taskFilter === null) setTaskFilter(tasks[0].id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks])
-
-  // Agent / human run filters — null = all selected
-  const [agentFilter, setAgentFilter] = useState<Set<number> | null>(null)
-  const [humanFilter, setHumanFilter] = useState<Set<string> | null>(null)
-
-  // Reset run filters whenever the task changes
-  useEffect(() => {
-    setAgentFilter(null)
-    setHumanFilter(null)
-  }, [taskFilter])
 
   useEffect(() => {
     const el = viewportRef.current
@@ -63,25 +36,18 @@ export default function HeatmapCarousel({ agentJourneys, humanJourneysBySession,
     }
     const ro = new ResizeObserver(update)
     ro.observe(el)
-    // Also re-measure after images load (they change scrollHeight)
     el.addEventListener('load', update, true)
     return () => { ro.disconnect(); el.removeEventListener('load', update, true) }
   }, [])
 
-  // Agent journeys for the selected task only
+  // Agent journeys for the selected task only (global agentFilter already applied upstream)
   const taskAgentJourneys = useMemo(() => {
     return taskFilter !== null
       ? agentJourneys.filter(j => j.task_id === taskFilter)
       : agentJourneys
   }, [agentJourneys, taskFilter])
 
-  // Agent journeys after run-level filter
-  const filteredAgentJourneys = useMemo(() => {
-    if (agentFilter === null) return taskAgentJourneys
-    return taskAgentJourneys.filter(j => agentFilter.has(j.id))
-  }, [taskAgentJourneys, agentFilter])
-
-  // Human steps filtered by task then by session filter
+  // Human steps filtered by task (global sessionFilter already applied upstream)
   const filteredHumanSteps = useMemo(() => {
     const selectedTask = tasks.find(t => t.id === taskFilter)
     const result = new Map<string, AgentStep[]>()
@@ -96,20 +62,14 @@ export default function HeatmapCarousel({ agentJourneys, humanJourneysBySession,
       if (steps.length > 0) result.set(sessionId, steps)
     }
 
-    if (humanFilter !== null) {
-      for (const id of Array.from(result.keys())) {
-        if (!humanFilter.has(id)) result.delete(id)
-      }
-    }
-
     return result
-  }, [humanJourneysBySession, taskFilter, humanFilter, tasks])
+  }, [humanJourneysBySession, taskFilter, tasks])
 
   const pages = useMemo(() => {
-    const agentStepArrays = filteredAgentJourneys.map(j => j.steps as AgentStep[])
+    const agentStepArrays = taskAgentJourneys.map(j => j.steps as AgentStep[])
     const humanStepArrays = Array.from(filteredHumanSteps.values())
     return getAggregatedScreenshots(agentStepArrays, humanStepArrays)
-  }, [filteredAgentJourneys, filteredHumanSteps])
+  }, [taskAgentJourneys, filteredHumanSteps])
 
   // Reset page index when pages change
   useEffect(() => {
@@ -118,43 +78,31 @@ export default function HeatmapCarousel({ agentJourneys, humanJourneysBySession,
 
   const page = pages[Math.min(pageIdx, pages.length - 1)]
 
-  // Session IDs that have data for the selected task
-  const humanSessionIds = useMemo(() => {
-    const selectedTask = tasks.find(t => t.id === taskFilter)
-    return Array.from(humanJourneysBySession.keys()).filter(id => {
-      const journeys = humanJourneysBySession.get(id) ?? []
-      return journeys.some(tj => {
-        if (taskFilter === null) return true
-        if (tj.taskId !== null) return Number(tj.taskId) === taskFilter
-        return selectedTask ? tj.taskTitle === selectedTask.title : false
-      })
-    })
-  }, [humanJourneysBySession, taskFilter, tasks])
-
-  function toggleAgent(id: number) {
-    setAgentFilter(prev => {
-      const allIds = taskAgentJourneys.map(j => j.id)
-      const current = prev === null ? new Set(allIds) : new Set(prev)
-      if (current.has(id)) { current.delete(id) } else { current.add(id) }
-      if (current.size === allIds.length) return null
-      return current
-    })
-  }
-
-  function toggleHuman(id: string) {
-    setHumanFilter(prev => {
-      const allIds = humanSessionIds
-      const current = prev === null ? new Set(allIds) : new Set(prev)
-      if (current.has(id)) { current.delete(id) } else { current.add(id) }
-      if (current.size === allIds.length) return null
-      return current
-    })
-  }
-
   const hasAgent = page?.heatmapDots?.some(d => d.kind === 'agent') ?? false
   const hasHuman = page?.heatmapDots?.some(d => d.kind === 'human') ?? false
   const hasAttention = page?.heatmapDots?.some(d => d.kind === 'attention') ?? false
   const colorMode = (hasAgent && hasHuman) || hasAttention ? 'split' : 'unified'
+
+  // ── Shared task dropdown ────────────────────────────────────────────────────
+  const taskDropdown = tasks.length > 0 ? (
+    <div style={{ padding: '6px 16px', borderBottom: '1px solid var(--gray100)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--gray400)', flexShrink: 0 }}>Task</span>
+      <select
+        value={taskFilter ?? ''}
+        onChange={e => setTaskFilter(e.target.value === '' ? null : Number(e.target.value))}
+        style={{
+          fontSize: 'var(--fs-small)', fontWeight: 500, fontFamily: 'var(--font-sans)',
+          padding: '4px 28px 4px 10px', borderRadius: 6, border: '1px solid var(--border)',
+          background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer',
+          appearance: 'none', backgroundImage: CHEVRON_SVG,
+          backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center',
+          minWidth: 160, maxWidth: 300,
+        }}
+      >
+        {tasks.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+      </select>
+    </div>
+  ) : null
 
   if (loading && pages.length === 0) {
     return (
@@ -168,14 +116,7 @@ export default function HeatmapCarousel({ agentJourneys, humanJourneysBySession,
   if (pages.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-        {tasks.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 16px', borderBottom: '1px solid var(--gray100)', flexShrink: 0, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Task</span>
-            {tasks.map(t => (
-              <FilterPill key={t.id} label={t.title.length > 40 ? t.title.slice(0, 39) + '…' : t.title} active={taskFilter === t.id} color="var(--accent)" onClick={() => setTaskFilter(t.id)} />
-            ))}
-          </div>
-        )}
+        {taskDropdown}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 8, color: 'var(--gray400)', fontSize: 'var(--fs-body)' }}>
           <span style={{ fontSize: 'var(--fs-headline)' }}>🗺</span>
           No journey data for this task.
@@ -208,55 +149,8 @@ export default function HeatmapCarousel({ agentJourneys, humanJourneysBySession,
         </div>
       </div>
 
-      {/* Task filter */}
-      {tasks.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 16px', borderBottom: '1px solid var(--gray100)', flexShrink: 0, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Task</span>
-          {tasks.map(t => (
-            <FilterPill key={t.id} label={t.title.length > 40 ? t.title.slice(0, 39) + '…' : t.title} active={taskFilter === t.id} color="var(--accent)" onClick={() => setTaskFilter(t.id)} />
-          ))}
-        </div>
-      )}
-
-      {/* Journey selection row */}
-      <div style={{ display: 'flex', gap: 10, padding: '6px 16px', alignItems: 'center', borderBottom: '1px solid var(--gray100)', flexWrap: 'wrap', flexShrink: 0 }}>
-        {taskAgentJourneys.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-            <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Agent</span>
-            <FilterPill label="All" active={agentFilter === null} color="#32494B" onClick={() => setAgentFilter(null)} />
-            {agentJourneys.map((j, i) => (
-              <FilterPill
-                key={j.id}
-                label={`Run #${i + 1}`}
-                active={agentFilter === null || agentFilter.has(j.id)}
-                color="#32494B"
-                onClick={() => toggleAgent(j.id)}
-              />
-            ))}
-          </div>
-        )}
-        {humanSessionIds.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-            <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Human</span>
-            <FilterPill label="All" active={humanFilter === null} color="#881342" onClick={() => setHumanFilter(null)} />
-            {humanSessionIds.map((id, i) => (
-              <FilterPill
-                key={id}
-                label={`User ${i + 1}`}
-                active={humanFilter === null || humanFilter.has(id)}
-                color="#881342"
-                onClick={() => toggleHuman(id)}
-              />
-            ))}
-          </div>
-        )}
-        {loading && (
-          <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', marginLeft: 'auto' }}>
-            <span style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', width: 5, height: 5, borderRadius: '50%', background: 'var(--gray400)', display: 'inline-block', marginRight: 4 }} />
-            loading sessions…
-          </span>
-        )}
-      </div>
+      {/* Task filter dropdown */}
+      {taskDropdown}
 
       {/* Legend */}
       <div style={{ display: 'flex', gap: 12, padding: '6px 16px', alignItems: 'center', flexShrink: 0, borderBottom: '1px solid var(--gray100)' }}>

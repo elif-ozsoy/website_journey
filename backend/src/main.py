@@ -18,15 +18,16 @@ from db.init_db import init_db
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import time, logging
-    for attempt in range(1, 11):
+    for attempt in range(1, 21):
         try:
             init_db()
             break
         except Exception as exc:
-            logging.warning(f"DB init attempt {attempt}/10 failed: {exc}. Retrying in 3s…")
-            if attempt == 10:
-                raise
-            time.sleep(3)
+            logging.warning(f"DB init attempt {attempt}/20 failed: {exc}. Retrying in 5s…")
+            if attempt == 20:
+                logging.error("DB init failed after 20 attempts — starting anyway, will retry on first request")
+            else:
+                time.sleep(5)
 
     # One shared HTTP client for the whole app — reuses connections across
     # all proxied requests instead of doing TCP+TLS handshakes per asset.

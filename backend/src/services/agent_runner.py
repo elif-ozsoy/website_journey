@@ -105,7 +105,7 @@ def _build_llm(llm_provider: str, api_key: str, model: str | None):
 
     if llm_provider == "nvidia":
         return ChatOpenAI(
-            model=model or "qwen/qwen3.5-122b-a10b", #"meta/llama-3.2-11b-vision-instruct", "meta/llama-4-maverick-17b-128e-instruct"
+            model=model or "mistralai/mistral-large-3-675b-instruct-2512", #"qwen/qwen3.5-122b-a10b", #"meta/llama-3.2-11b-vision-instruct", "meta/llama-4-maverick-17b-128e-instruct"
             api_key=api_key,
             base_url="https://integrate.api.nvidia.com/v1",
             timeout=120,
@@ -226,6 +226,7 @@ async def run_browser_agent(
     model: str | None,
     step_callback: Callable,
     status_callback: Callable,
+    extend_system_message: str | None = None,
 ) -> dict:
     try:
         browser_use_mod = importlib.import_module("browser_use")
@@ -244,6 +245,7 @@ async def run_browser_agent(
     # )
 
     browser = Browser(
+        # cdp_url="ws://127.0.0.1:9222",
         headless=True,
         args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
         window_size={'width': 1280, 'height': 800},
@@ -264,7 +266,8 @@ async def run_browser_agent(
         max_failures=3,
         llm_timeout=120,
         max_actions_per_step=1,
-        save_conversation_path=save_conversation_path
+        save_conversation_path=save_conversation_path,
+        extend_system_message=extend_system_message,
     )
 
     await status_callback("Agent is running... (this may take a few minutes)")
@@ -344,7 +347,7 @@ async def run_browser_agent(
             action_type=action_type,
             action_details=action_details,
             reasoning=getattr(brain, "evaluation_previous_goal", "") or "",
-            thought=getattr(brain, "thought", "") or "",
+            thought=getattr(brain, "thinking", "") or "",
             next_goal=getattr(brain, "next_goal", "") or "",
             screenshot_base64=screenshot_b64,
             element_coordinates=coords,

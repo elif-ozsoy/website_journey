@@ -5,7 +5,7 @@ import { FOCUS_AREA_LABELS } from '../../lib/types'
 interface Props {
   open: boolean
   onClose: () => void
-  onSubmit: (title: string, description: string, focusAreas: FocusArea[]) => Promise<void>
+  onSubmit: (title: string, description: string, focusAreas: FocusArea[], expectedSolution: string) => Promise<void>
   initialTask?: Task
 }
 
@@ -15,6 +15,7 @@ export default function AddTaskModal({ open, onClose, onSubmit, initialTask }: P
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [focusAreas, setFocusAreas] = useState<FocusArea[]>([])
+  const [expectedSolution, setExpectedSolution] = useState('')
   const [saving, setSaving] = useState(false)
   const titleRef = useRef<HTMLInputElement>(null)
 
@@ -23,6 +24,7 @@ export default function AddTaskModal({ open, onClose, onSubmit, initialTask }: P
       setTitle(initialTask?.title ?? '')
       setDescription(initialTask?.description ?? '')
       setFocusAreas(initialTask?.focusAreas ?? [])
+      setExpectedSolution(initialTask?.expectedSolution ?? '')
       setSaving(false)
       setTimeout(() => titleRef.current?.focus(), 50)
     }
@@ -41,7 +43,7 @@ export default function AddTaskModal({ open, onClose, onSubmit, initialTask }: P
     if (!title.trim()) return
     setSaving(true)
     try {
-      await onSubmit(title.trim(), description.trim(), focusAreas)
+      await onSubmit(title.trim(), description.trim(), focusAreas, expectedSolution.trim())
       onClose()
     } finally {
       setSaving(false)
@@ -125,6 +127,17 @@ export default function AddTaskModal({ open, onClose, onSubmit, initialTask }: P
                 )
               })}
             </div>
+          </div>
+
+          <div className="modal-field">
+            <label className="modal-label">Expected solution <span className="modal-label-hint">(optional)</span></label>
+            <textarea
+              className="modal-input modal-textarea"
+              value={expectedSolution}
+              onChange={e => setExpectedSolution(e.target.value)}
+              placeholder="What answer confirms the task was completed correctly? e.g. 'Ms. Meyer, Room 204' or 'Click Settings → Account → Delete'"
+              rows={3}
+            />
           </div>
 
           <div className="modal-footer">

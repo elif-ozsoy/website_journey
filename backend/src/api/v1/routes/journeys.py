@@ -55,6 +55,7 @@ def _journey_to_response(j: Journey, strip_screenshots: bool = False, db: Sessio
         source=j.source,
         is_agent=j.is_agent,
         embedding=json.loads(j.embedding) if j.embedding else None,
+        solution_eval=json.loads(j.solution_eval) if getattr(j, 'solution_eval', None) else None,
         completed_at=j.completed_at,
         updated_at=j.updated_at,
     )
@@ -131,9 +132,11 @@ def trigger_analysis(
 def list_site_journeys(
     site_id: str,
     source: str | None = None,
+    task_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    journeys = svc.get_journeys_for_site(db, site_id, source=source)
+    print(f"Listing journeys for site_id={site_id}, source={source}, task_id={task_id}")
+    journeys = svc.get_journeys_for_site(db, site_id, source=source, task_id=task_id)
     return [_journey_to_response(j, strip_screenshots=True, db=db) for j in journeys]
 
 

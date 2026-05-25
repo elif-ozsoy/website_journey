@@ -3,16 +3,16 @@ import json
 import sys
 import threading
 import traceback
-from urllib.parse import urlparse
-
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 import services.journeys as journey_svc
 import services.policy as policy_svc
+import services.tasks as task_svc
 from db.session import SessionLocal
 from services.agent_runner import run_browser_agent
 from services.journeys import persist_browseruse_screenshots
 from services.attention import annotate_attention_background
+from services.solution_eval import evaluate_solution
 import services.auth as auth_svc
 
 router = APIRouter(tags=["Agent"])
@@ -68,23 +68,37 @@ async def websocket_run(websocket: WebSocket):
             except Exception:
                 pass  # degrade gracefully — run without policy if it fails
 
+        policy_system_ext: str | None = None
         if policy:
-            start_path = urlparse(url).path or "/"
-            policy_block = policy_svc.generate_prompt_injection(start_path, policy)
-            overview_lines = ["<human_policy_overview>"]
-            for pg_path, pg_pol in sorted(policy.items()):
-                dist = pg_pol.get("action_distribution", [])
-                if dist:
-                    top = dist[0]
-                    pct = round(top["frequency"] * 100)
-                    label = top.get("text") or top.get("href") or "?"
-                    overview_lines.append(f'  {pg_path}: top action "{label}" [{pct}%]')
-            overview_lines.append("</human_policy_overview>")
+            full_policy_block = policy_svc.generate_full_policy_prompt(policy)
             task = (
                 f"{task}\n\n"
                 f"IMPORTANT: Behave like the average human user.\n\n"
-                f"{policy_block}\n\n"
-                + "\n".join(overview_lines)
+                f"{full_policy_block}"
+            )
+            policy_system_ext = (
+                "\n\n"
+                "# POLICY BOT AMENDMENTS — apply these as extensions to each named section:\n\n"
+                "<intro>\n"
+                "7. Following the trend of the provided human journeys, even if this means that the task may be completed slower or not completed at all\n"
+                "</intro>\n\n"
+                "<input>\n"
+                "6. <human_behavioral_policy>: Trends of human journeys, which you need to follow. "
+                "This block describes how real users interact with the site and must guide every action you take.\n"
+                "</input>\n\n"
+                "<browser_rules>\n"
+                "- STRICTLY follow the human journey trends provided in <human_behavioral_policy>. "
+                "Your actions must mirror the most common human behavior patterns shown there, "
+                "even if this results in a slower path or the task not being fully completed.\n"
+                "</browser_rules>\n\n"
+                "<planning>\n"
+                "- When creating or revising a plan, always prioritise actions that align with the human journey trends "
+                "in <human_behavioral_policy>. Adherence to human journey trends takes priority over optimal task completion.\n"
+                "</planning>\n\n"
+                "<critical_reminders>\n"
+                "13. ALWAYS follow the human journey trends provided in <human_behavioral_policy> — "
+                "human journey adherence takes priority over task efficiency or completion speed.\n"
+                "</critical_reminders>"
             )
 
         xai_trace: list[dict] = []
@@ -115,47 +129,95 @@ async def websocket_run(websocket: WebSocket):
             model=model,
             step_callback=step_callback,
             status_callback=status_callback,
+            extend_system_message=policy_system_ext,
         )
 
         if xai_trace:
             result["xai_trace"] = xai_trace
+
+        print(f"site_id={site_id} - run complete with {len(result.get('steps', []))} steps, sending result", flush=True, file=sys.stderr)
 
         # Persist journey to DB if site_id provided
         if site_id and result.get("steps"):
             try:
                 db = SessionLocal()
                 try:
-                    user_id = None
-                    if user_token:
-                        user = auth_svc.get_user_by_token(db, user_token)
-                        user_id = user.id if user else None
-                        if user_id is None:
-                            print(f"Warning: user_token provided but lookup failed: {user_token[:20] if user_token else 'None'}...", flush=True, file=sys.stderr)
-                    if use_policy:
-                        journey_source = f"policy_bot_{run_mode}"  # policy_bot_human_policy | policy_bot_ai_policy
-                        # Normalise to the shorter names the frontend expects
-                        if run_mode == "ai_policy":
-                            journey_source = "policy_bot_ai"
-                        else:
-                            journey_source = "policy_bot_human"
+                    from models.site import Site as SiteModel
+                    if not db.get(SiteModel, site_id):
+                        print(f"[WS] site_id={site_id!r} not found in DB — skipping journey persistence", flush=True, file=sys.stderr)
                     else:
-                        journey_source = "agent"
-                    journey = journey_svc.upsert_journey(
-                        db,
-                        site_id=site_id,
-                        task_title=original_task,
-                        steps=result["steps"],
-                        policy_trace=xai_trace if xai_trace else None,
-                        user_id=user_id,
-                        task_id=int(task_id) if task_id else None,
-                        source=journey_source,
-                    )
-                    persist_browseruse_screenshots(db, journey, site_id, result["steps"])
-                    threading.Thread(
-                        target=annotate_attention_background,
-                        args=(journey.id,),
-                        daemon=True,
-                    ).start()
+                        user_id = None
+                        if user_token:
+                            user = auth_svc.get_user_by_token(db, user_token)
+                            user_id = user.id if user else None
+                            if user_id is None:
+                                print(f"Warning: user_token provided but lookup failed: {user_token[:20] if user_token else 'None'}...", flush=True, file=sys.stderr)
+                        if use_policy:
+                            if run_mode == "ai_policy":
+                                journey_source = "policy_bot_ai"
+                            else:
+                                journey_source = "policy_bot_human"
+                        else:
+                            journey_source = "agent"
+                        journey = journey_svc.upsert_journey(
+                            db,
+                            site_id=site_id,
+                            task_title=original_task,
+                            steps=result["steps"],
+                            policy_trace=xai_trace if xai_trace else None,
+                            user_id=user_id,
+                            task_id=int(task_id) if task_id else None,
+                            source=journey_source,
+                        )
+                        persist_browseruse_screenshots(db, journey, site_id, result["steps"])
+                        threading.Thread(
+                            target=annotate_attention_background,
+                            args=(journey.id, api_key, llm_provider),
+                            daemon=True,
+                        ).start()
+
+                        # ── Solution evaluation ──────────────────────────────
+                        solution_eval_result = None
+                        terminal = result["steps"][-1] if result.get("steps") else None
+                        if (
+                            terminal
+                            and terminal.get("action_type") == "done"
+                            and terminal.get("outcome") == "success"
+                            and task_id
+                        ):
+                            try:
+                                task_obj = task_svc.get_task(db, int(task_id))
+                                expected = task_obj.expected_solution if task_obj else None
+                                if expected:
+                                    agent_answer = str(
+                                        terminal.get("action_details", {}).get("text") or ""
+                                    ).strip()
+                                    if agent_answer:
+                                        solution_eval_result = await asyncio.wait_for(
+                                            asyncio.get_event_loop().run_in_executor(
+                                                None,
+                                                evaluate_solution,
+                                                agent_answer,
+                                                expected,
+                                                api_key,
+                                                llm_provider,
+                                            ),
+                                            timeout=6.0,
+                                        )
+                                        if solution_eval_result:
+                                            import json as _json
+                                            journey.solution_eval = _json.dumps({
+                                                **solution_eval_result,
+                                                "expected_solution": expected,
+                                                "agent_answer": agent_answer[:500],
+                                            })
+                                            db.commit()
+                            except Exception:
+                                pass  # never block the WS response
+
+                        if solution_eval_result:
+                            result["solution_eval"] = solution_eval_result
+
                 finally:
                     db.close()
             except Exception as exc:

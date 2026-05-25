@@ -126,6 +126,17 @@ export default function EvaluationPage() {
   const humanJourneys = versionedSessions.length
   const agentJourneys = versionedJourneys.length
 
+  // Smart-skip: compute which tasks already have agent journeys
+  const existingAgentTaskIds = new Set(
+    versionedJourneys
+      .filter(j => j.is_agent)
+      .map(j => j.task_id)
+      .filter((id): id is number => id !== null)
+  )
+  const newTasks = tasks.filter(t => !existingAgentTaskIds.has(t.id))
+  const hasNewTasks = newTasks.length > 0
+  const hasExistingJourneys = existingAgentTaskIds.size > 0
+
   const step1Done = tasks.length > 0
   const step2Done = humanJourneys > 0 || agentJourneys > 0
   const step2Locked = !step1Done
@@ -309,18 +320,44 @@ export default function EvaluationPage() {
             <AgentGallery activeVersionId={activeVersionId} />
             {effectiveRunState === 'complete' && <span className="eval-collect-status eval-collect-status--blue" style={{ marginBottom: 12 }}>✓ Agent run completed</span>}
             {effectiveRunState === 'idle' && agentJourneys > 0 && <span className="eval-collect-status eval-collect-status--blue" style={{ marginBottom: 12 }}>✓ {agentJourneys} journey{agentJourneys !== 1 ? 's' : ''} recorded</span>}
+            {/* Primary run button — smart skip: only runs tasks without existing journeys */}
             <button
               className="btn btn-primary"
               disabled={selectedAgentCount === 0 || !apiKey.trim()}
               onClick={() => {
                 if (effectiveRunState === 'running') { stopRun() }
-                else { stopRun(); startRun(siteId!, siteUrl, tasks, activeVersionId, agents.filter(a => a.selected)) }
+                else {
+                  const tasksToRun = (hasNewTasks && hasExistingJourneys) ? newTasks : tasks
+                  stopRun(); startRun(siteId!, siteUrl, tasksToRun, activeVersionId, agents.filter(a => a.selected))
+                }
               }}
             >
               {effectiveRunState === 'running' ? '⏹ Stop running'
-                : agentJourneys > 0 || effectiveRunState === 'complete' ? 'Re-run agents →'
-                : 'Run agents →'}
+                : hasNewTasks && hasExistingJourneys
+                  ? `Run ${newTasks.length} new task${newTasks.length !== 1 ? 's' : ''} →`
+                  : hasExistingJourneys
+                    ? 'Re-run all →'
+                    : 'Run agents →'}
             </button>
+
+            {/* Secondary button — force re-run all when some tasks are already done */}
+            {hasNewTasks && hasExistingJourneys && effectiveRunState !== 'running' && (
+              <button
+                className="btn btn-outline btn-sm"
+                disabled={selectedAgentCount === 0 || !apiKey.trim()}
+                onClick={() => { stopRun(); startRun(siteId!, siteUrl, tasks, activeVersionId, agents.filter(a => a.selected)) }}
+                style={{ marginTop: 6 }}
+              >
+                Re-run all {tasks.length} tasks ↺
+              </button>
+            )}
+
+            {/* Info hint when tasks are being skipped */}
+            {hasNewTasks && hasExistingJourneys && effectiveRunState === 'idle' && (
+              <p className="eval-btn-hint" style={{ textAlign: 'left', color: 'var(--gray400)' }}>
+                {existingAgentTaskIds.size} of {tasks.length} tasks already have journeys and will be skipped.
+              </p>
+            )}
             {selectedAgentCount === 0 && (
               <p className="eval-btn-hint" style={{ textAlign: 'left' }}>Select at least one agent above to run.</p>
             )}

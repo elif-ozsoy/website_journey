@@ -28,7 +28,8 @@ export interface Task {
   description: string | null
   orderIndex: number
   createdAt: string
-  focusAreas?: FocusArea[]
+  focusAreas?: FocusArea[]      // persisted to backend — no longer ephemeral
+  expectedSolution?: string
 }
 
 export interface Session {

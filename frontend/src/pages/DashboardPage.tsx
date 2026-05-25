@@ -8,10 +8,9 @@ import { PROJECTS_STORAGE_KEY } from '../lib/types'
 import * as api from '../lib/api'
 
 import SankeyDiagram, { type NodeDivergence } from '../components/dashboard/SankeyDiagram'
+
 import HorizonGraph from '../components/dashboard/HorizonGraph'
 import HorizonInsightsPanel from '../components/dashboard/HorizonInsightsPanel'
-
-
 // ─── Re-evaluate modal ────────────────────────────────────────────────────────
 
 function ReEvalModal({ onClose, onConfirm }: { onClose: () => void; onConfirm: (changes: string) => void }) {
@@ -50,6 +49,7 @@ function ReEvalModal({ onClose, onConfirm }: { onClose: () => void; onConfirm: (
 import AggregateFlowView from '../components/dashboard/AggregateFlowView'
 import ActionPointsList from '../components/dashboard/ActionPointsList'
 import HeatmapCarousel from '../components/dashboard/HeatmapCarousel'
+import HeatmapInsightsPanel from '../components/dashboard/HeatmapInsightsPanel'
 import ComparePanel from '../components/dashboard/ComparePanel'
 import SankeyInsightsPanel from '../components/dashboard/SankeyInsightsPanel'
 
@@ -69,8 +69,7 @@ import type { CompareHighlight, DiagramRef } from '../lib/api'
 
 interface SelectOption { id: string; name: string; meta?: string }
 
-type ActiveView = 'overview' | 'aggregate' | 'heatmap' | 'human_vs_ai' | 'horizon_graph' | 'flow_sankey'
-// ─── Nav item icons ───────────────────────────────────────────────────────────
+type ActiveView = 'overview' | 'aggregate' | 'heatmap' | 'human_vs_ai' | 'time_event' | 'horizon_graph' | 'flow_sankey'// ─── Nav item icons ───────────────────────────────────────────────────────────
 
 // ─── Filter pills ─────────────────────────────────────────────────────────────
 
@@ -267,8 +266,7 @@ export default function DashboardPage() {
 
   const [searchParams, setSearchParams] = useSearchParams()
   const urlView = searchParams.get('view') ?? 'overview'
-  const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'human_vs_ai', 'horizon_graph', 'flow_sankey'] as ActiveView[]).includes(urlView as ActiveView)
-    ? (urlView as ActiveView)
+  const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'human_vs_ai', 'time_event', 'horizon_graph', 'flow_sankey'] as ActiveView[]).includes(urlView as ActiveView)    ? (urlView as ActiveView)
     : 'overview'
 
 
@@ -514,6 +512,16 @@ useEffect(() => {
     [humanJourneyMeta],
   )
 
+  // Session-filtered view of the task journey map, used by HeatmapCarousel
+  const filteredHumanJourneysBySession = useMemo(() => {
+    if (sessionFilter === null) return humanJourneysBySession
+    const out = new Map<string, HumanTaskJourney[]>()
+    for (const [id, journeys] of humanJourneysBySession) {
+      if (sessionFilter.has(id)) out.set(id, journeys)
+    }
+    return out
+  }, [humanJourneysBySession, sessionFilter])
+
   const humanLabels = useMemo(() => humanJourneyMeta.map(j => j.label), [humanJourneyMeta])
 
 
@@ -616,8 +624,9 @@ useEffect(() => {
                     aggregate: 'Aggregate Journeys',
                     heatmap: 'Heatmap',
                     human_vs_ai: 'Human vs AI',
-                    horizon_graph: 'Horizon Graph',
+                    time_event: 'Time-Event-Overview',
                     flow_sankey: 'Flow Diagram',
+                    horizon_graph: 'Horizon Graph',
                   }[activeView]}
               </span>
           </div>
@@ -885,21 +894,31 @@ useEffect(() => {
 
         {/* ── HEATMAP ── */}
         {activeView === 'heatmap' && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            {agentJourneys.length === 0 && sessions.length === 0 ? (
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, background: 'var(--bg)' }}>
-                <div style={{ fontSize: 'var(--fs-headline)' }}>🔥</div>
-                <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>No data for heatmap</div>
-                <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>Run an agent or collect human sessions first.</div>
-              </div>
-            ) : (
-              <HeatmapCarousel
-                agentJourneys={agentJourneys as api.JourneyResponse[]}
-                humanJourneysBySession={humanJourneysBySession}
-                loading={humanLoading}
-                tasks={tasks}
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+            {/* Carousel (left) */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+              {agentJourneys.length === 0 && sessions.length === 0 ? (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, background: 'var(--bg)' }}>
+                  <div style={{ fontSize: 'var(--fs-headline)' }}>🔥</div>
+                  <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>No data for heatmap</div>
+                  <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>Run an agent or collect human sessions first.</div>
+                </div>
+              ) : (
+                <HeatmapCarousel
+                  agentJourneys={agentJourneys as api.JourneyResponse[]}
+                  humanJourneysBySession={filteredHumanJourneysBySession}
+                  loading={humanLoading}
+                  tasks={tasks}
+                />
+              )}
+            </div>
+            {/* Insights panel (right) — matches Sankey tab width */}
+            <div style={{ width: 320, flexShrink: 0, borderLeft: '1px solid var(--border)', overflowY: 'auto', background: 'var(--surface)' }}>
+              <HeatmapInsightsPanel
+                compareAnalysis={compareAnalysis}
+                compareLoading={compareLoading}
               />
-            )}
+            </div>
           </div>
         )}
 
@@ -922,6 +941,14 @@ useEffect(() => {
                 onClearActionContext={() => setCompareContext(null)}
               />
             )}
+          </div>
+        )}
+
+        {activeView === 'time_event' && (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, background: 'var(--bg)' }}>
+            <div style={{ fontSize: 'var(--fs-headline)' }}>⏱</div>
+            <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>Time-Event-Overview</div>
+            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', maxWidth: 340, textAlign: 'center', lineHeight: 1.6 }}>This view is coming soon. It will show a timeline of events across all sessions.</div>
           </div>
         )}
 
@@ -961,9 +988,11 @@ useEffect(() => {
             </div>
           </div>
         )}
+    
 
       </main>
     </div>
+    
 
     {reEvalOpen && <ReEvalModal onClose={() => setReEvalOpen(false)} onConfirm={handleReEvaluate} />}
     </>

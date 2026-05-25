@@ -21,10 +21,18 @@ export interface AgentStep {
   timestamp: number;
 }
 
+export interface SolutionEval {
+  result: 'correct' | 'partially_correct' | 'false_or_misleading';
+  reason: string;
+  expected_solution?: string;
+  agent_answer?: string;
+}
+
 export interface AgentResult {
   steps: AgentStep[];
   total_steps: number;
   success: boolean;
+  solution_eval?: SolutionEval;
 }
 
 export type WsMessage =

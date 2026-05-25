@@ -31,7 +31,7 @@ def upsert_journey(
     user always has at most one journey per task per project per source.
     """
     existing = None
-    if not is_agent: #the same agent tasks overwrite each other 
+    if not is_agent: #the same agent tasks overwrite each other
         existing = (
             db.query(Journey)
             .filter(
@@ -43,7 +43,7 @@ def upsert_journey(
             )
             .first()
         )
-        
+
 
     now = datetime.now(timezone.utc)
     steps_json = json.dumps(steps)
@@ -120,13 +120,17 @@ def get_journeys_for_site(
     site_id: str,
     user_id: str | None = None,
     source: str | None = None,
+    task_id: int | None = None,
 ) -> list[Journey]:
     """Get journeys for a site. If user_id provided, only return that user's journeys."""
+    print(f"Querying journeys for site_id={site_id}, user_id={user_id}, source={source}, task_id={task_id}")
     q = db.query(Journey).filter(Journey.site_id == site_id)
     if user_id is not None:
         q = q.filter(Journey.user_id == user_id)
     if source is not None:
         q = q.filter(Journey.source == source)
+    if task_id is not None:
+        q = q.filter(Journey.task_id == task_id)
     return q.order_by(Journey.completed_at.desc()).all()
 
 
@@ -156,6 +160,8 @@ def get_projects_for_user(db: Session, user_id: str) -> list[dict]:
                         "title": t.title,
                         "description": t.description,
                         "order_index": t.order_index,
+                        "focus_areas": json.loads(t.focus_areas) if getattr(t, 'focus_areas', None) else None,
+                        "expected_solution": getattr(t, 'expected_solution', None),
                     }
                     for t in tasks
                 ],
@@ -173,6 +179,7 @@ def get_projects_for_user(db: Session, user_id: str) -> list[dict]:
                         "source": getattr(j, 'source', 'agent'),
                         "is_agent": j.is_agent,
                         "embedding": json.loads(j.embedding) if j.embedding else None,
+                        "solution_eval": json.loads(j.solution_eval) if getattr(j, 'solution_eval', None) else None,
                         "completed_at": j.completed_at.isoformat(),
                         "updated_at": j.updated_at.isoformat(),
                     }

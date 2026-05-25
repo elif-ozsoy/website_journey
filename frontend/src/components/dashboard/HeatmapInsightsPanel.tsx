@@ -1,17 +1,13 @@
-import { useState, useEffect, useMemo } from 'react'
-import type { ComparativeAnalysis, ActionPointItem, JourneyResponse } from '../../lib/api'
-import * as api from '../../lib/api'
-import type { AgentStep } from '../agent/agentTypes'
+import { useState, useMemo } from 'react'
+import type { ComparativeAnalysis, ActionPointItem } from '../../lib/api'
 
-const AGENT_COLOR = '#32494B'
-const HUMAN_COLOR = '#881342'
-
-interface HorizonActionPoint {
+interface HeatmapActionPoint {
   id: string
   text: string
   type?: 'ux_issue' | 'agent_gap' | 'human_issue'
   taskTitle: string
   severity: 'high' | 'medium'
+  heatmapReason?: string
 }
 
 function Spinner({ size = 10 }: { size?: number }) {
@@ -62,85 +58,60 @@ function TabBtn({ label, active, badge, onClick }: {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--gray400)', marginBottom: 6 }}>
+    <div style={{
+      fontSize: '10px', fontWeight: 700, textTransform: 'uppercase',
+      letterSpacing: '0.07em', color: 'var(--gray400)', marginBottom: 6,
+    }}>
       {children}
     </div>
   )
 }
 
-function LegendSwatch({ color, label, sub }: { color: string; label: string; sub?: string }) {
+function ColorSwatch({ color, label, sub }: { color: string; label: string; sub?: string }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-      <span style={{ width: 10, height: 10, borderRadius: 2, background: color, flexShrink: 0, marginTop: 3 }} />
-      <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.4 }}>
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
+      <span style={{
+        width: 14, height: 14, borderRadius: 3, background: color,
+        flexShrink: 0, marginTop: 2, border: '1px solid rgba(0,0,0,0.08)',
+      }} />
+      <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.5 }}>
         <strong>{label}</strong>{sub ? ` — ${sub}` : ''}
       </span>
     </div>
   )
 }
 
-export default function HorizonInsightsPanel({
+export default function HeatmapInsightsPanel({
   compareAnalysis,
   compareLoading,
-  agentJourneys,
-  humanJourneySteps,
 }: {
   compareAnalysis: ComparativeAnalysis | null
   compareLoading: boolean
-  agentJourneys: JourneyResponse[]
-  humanJourneySteps: AgentStep[][]
 }) {
   const [activeTab, setActiveTab] = useState<'guide' | 'insights'>('insights')
 
-  const actionPoints = useMemo<HorizonActionPoint[]>(() => {
+  // Collect ALL action points from the analysis (not filtered by diagram view)
+  const allPoints = useMemo<HeatmapActionPoint[]>(() => {
     if (!compareAnalysis) return []
-    const pts: HorizonActionPoint[] = []
+    const pts: HeatmapActionPoint[] = []
     for (const task of compareAnalysis.task_analyses) {
       if (task.difficulty === 'low') continue
       const severity: 'high' | 'medium' = task.difficulty === 'high' ? 'high' : 'medium'
       for (const raw of [...task.pain_points, ...task.recommendations]) {
         const item = raw as ActionPointItem
+        const heatmapRef = item.diagrams?.find(d => d.view === 'heatmap')
         pts.push({
-          id: `horizon::${task.task_title}::${item.text.slice(0, 40)}`,
+          id: `${task.task_title}::${item.text.slice(0, 40)}`,
           text: item.text,
           type: item.type,
           taskTitle: task.task_title,
           severity,
+          heatmapReason: heatmapRef?.reason,
         })
       }
     }
     return pts
   }, [compareAnalysis])
-
-  const stats = useMemo(() => {
-    const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null
-    const agentStepCounts = agentJourneys.map(j => j.total_steps).filter(n => n > 0)
-    const humanStepCounts = humanJourneySteps.map(s => s.length).filter(n => n > 0)
-    return {
-      agent_journey_count: agentJourneys.length,
-      human_journey_count: humanJourneySteps.length,
-      agent_avg_steps: avg(agentStepCounts),
-      human_avg_steps: avg(humanStepCounts),
-      graph_type: 'horizon',
-      note: 'The horizon graph shows action density (clicks, scrolls, inputs, navigation) over relative journey time (0–100%). Darker bands mean higher activity intensity at that point in the journey.',
-    }
-  }, [agentJourneys, humanJourneySteps])
-
-  const [explanations, setExplanations] = useState<Record<string, string>>({})
-  const [expLoading, setExpLoading] = useState<Record<string, boolean>>({})
-
-  const pointIds = actionPoints.map(p => p.id).join(',')
-  useEffect(() => {
-    if (actionPoints.length === 0) return
-    for (const pt of actionPoints) {
-      setExpLoading(prev => ({ ...prev, [pt.id]: true }))
-      api.explainDiagramLink(pt.text, 'horizon', stats as Record<string, unknown>)
-        .then(r => setExplanations(prev => ({ ...prev, [pt.id]: r.explanation })))
-        .catch(() => {})
-        .finally(() => setExpLoading(prev => ({ ...prev, [pt.id]: false })))
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pointIds])
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -148,49 +119,74 @@ export default function HorizonInsightsPanel({
       {/* ── Tab bar ── */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0, background: 'var(--surface)' }}>
         <TabBtn label="Guide" active={activeTab === 'guide'} onClick={() => setActiveTab('guide')} />
-        <TabBtn label="Action Points" active={activeTab === 'insights'} badge={actionPoints.length} onClick={() => setActiveTab('insights')} />
+        <TabBtn label="Action Points" active={activeTab === 'insights'} badge={allPoints.length} onClick={() => setActiveTab('insights')} />
       </div>
 
       {/* ──────────────── GUIDE TAB ──────────────── */}
       {activeTab === 'guide' && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
           <div>
-            <SectionLabel>What is a horizon graph?</SectionLabel>
+            <SectionLabel>What is a heatmap?</SectionLabel>
             <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.7 }}>
-              Each horizontal strip represents one journey (agent or human). The x-axis is <strong>relative journey time</strong> — 0% = start, 100% = end. The darkness of the fill shows <strong>action density</strong>: how many clicks, scrolls, inputs, and navigations occurred at that moment.
+              The heatmap overlays a thermal layer on top of each screenshot, showing where clicks and
+              visual attention concentrated during the session. Hot spots reveal where users focused most;
+              cold areas show sections that were ignored.
             </p>
           </div>
 
           <div>
-            <SectionLabel>Reading the bands</SectionLabel>
-            <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.7 }}>
-              Each strip uses the <strong>horizon chart technique</strong>: the density curve is split into three bands. The lightest band shows low activity; each darker band is drawn on top for high-intensity moments. This keeps every strip exactly the same height while still conveying the full range of intensity through darkness.
-            </p>
-          </div>
-
-          <div>
-            <SectionLabel>Comparing AI and human journeys</SectionLabel>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-              <LegendSwatch color={AGENT_COLOR} label="AI journeys" sub="teal strips" />
-              <LegendSwatch color={HUMAN_COLOR} label="Human journeys" sub="rose strips" />
+            <SectionLabel>Reading the colours</SectionLabel>
+            <div style={{ marginTop: 4 }}>
+              <ColorSwatch
+                color="linear-gradient(90deg, #2563eb 0%, #22c55e 40%, #eab308 70%, #ef4444 100%)"
+                label="Blue → Red (agent clicks)"
+                sub="low density to high density for AI-agent interactions"
+              />
+              <ColorSwatch
+                color="linear-gradient(90deg, #fce7f3 0%, #f472b6 50%, #be185d 100%)"
+                label="Pink → Deep pink (human clicks)"
+                sub="low to high density for human tester interactions"
+              />
+              <ColorSwatch
+                color="#22c55e"
+                label="Green dots"
+                sub="where the AI focused its reading & attention (VLM annotation)"
+              />
+              <ColorSwatch
+                color="#a855f7"
+                label="Purple zones"
+                sub="overlap areas where both agent and human concentrated"
+              />
             </div>
+          </div>
+
+          <div>
+            <SectionLabel>Navigating multiple pages</SectionLabel>
             <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.7 }}>
-              Look for differences in <em>where</em> the dark regions appear. If humans have heavy activity early but AI has it late, the task likely has a discovery or navigation friction point.
+              Each dot at the top of the page navigator corresponds to a unique URL visited during the
+              session. Click the arrows or dots to step through the pages. The heatmap updates to show
+              interaction density for that specific page only.
             </p>
           </div>
 
           <div>
-            <SectionLabel>Clicking a strip</SectionLabel>
+            <SectionLabel>Click vs attention</SectionLabel>
             <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.7 }}>
-              Click anywhere on a strip to open a detail panel showing all actions recorded within ±5% of that relative time position. Use this to understand <em>what</em> was happening during a dense or sparse region.
+              The solid thermal overlay represents <strong>actual click events</strong> — where users
+              physically clicked or tapped. The green dots come from the Vision-Language Model
+              (VLM) and mark where the AI was <strong>reading and extracting information</strong>
+              from the page, even without clicking. Gaps between the two reveal pages the AI scanned
+              but did not interact with.
             </p>
           </div>
 
           <div>
-            <SectionLabel>Filter buttons</SectionLabel>
+            <SectionLabel>Filters</SectionLabel>
             <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.7 }}>
-              Use the <strong>All / AI only / Humans only</strong> buttons in the top-right of the graph to focus on one group. All density values are re-scaled relative to the visible journeys so comparisons stay meaningful.
+              Use the <strong>Filters ▾</strong> button above the heatmap to show or hide individual
+              agent runs and human sessions. This lets you isolate a single user's behaviour or
+              compare specific runs side-by-side.
             </p>
           </div>
 
@@ -201,27 +197,28 @@ export default function HorizonInsightsPanel({
       {activeTab === 'insights' && (
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
 
+          {/* Loading */}
           {compareLoading && (
             <div style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--gray400)', fontSize: 'var(--fs-small)' }}>
               <Spinner size={12} /> Generating analysis…
             </div>
           )}
 
-          {!compareLoading && actionPoints.length === 0 && (
+          {/* Empty state */}
+          {!compareLoading && allPoints.length === 0 && (
             <div style={{ padding: '14px 16px', fontSize: 'var(--fs-small)', color: 'var(--gray400)', lineHeight: 1.6 }}>
               {compareAnalysis
-                ? 'No issues flagged in this analysis.'
+                ? 'No action points found in the analysis.'
                 : 'Run the comparative analysis from the Overview tab to see action points here.'}
             </div>
           )}
 
-          {actionPoints.map((pt, i) => {
+          {/* Action point cards */}
+          {allPoints.map((pt, i) => {
             const badge = pt.type ? BADGE_MAP[pt.type] : null
-            const explanation = explanations[pt.id]
-            const isLoading = expLoading[pt.id]
-
             return (
               <div key={pt.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--gray100)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {/* Severity + task */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{
                     fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: 99, flexShrink: 0,
@@ -235,6 +232,7 @@ export default function HorizonInsightsPanel({
                   </span>
                 </div>
 
+                {/* Action point text */}
                 <p style={{ margin: 0, fontSize: 'var(--fs-small)', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.5 }}>
                   {i + 1}. {pt.text}
                 </p>
@@ -249,27 +247,17 @@ export default function HorizonInsightsPanel({
                   </span>
                 )}
 
-                <div style={{ padding: '8px 10px', borderRadius: 6, background: 'var(--gray50)', border: '1px solid var(--gray100)' }}>
-                  <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--gray400)', marginBottom: 5 }}>
-                    What to look for in the graph
-                  </div>
-                  {isLoading ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-small)', color: 'var(--gray400)' }}>
-                      <Spinner size={9} /> Analysing…
+                {/* Heatmap-specific context (if available) */}
+                {pt.heatmapReason && (
+                  <div style={{ padding: '8px 10px', borderRadius: 6, background: 'var(--gray50)', border: '1px solid var(--gray100)' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--gray400)', marginBottom: 4 }}>
+                      What to look for in the heatmap
                     </div>
-                  ) : explanation ? (
-                    <p style={{
-                      margin: 0, fontSize: 'var(--fs-small)', color: 'var(--brand)', lineHeight: 1.5,
-                      borderLeft: '2px solid var(--brand)', paddingLeft: 7,
-                    }}>
-                      {explanation}
+                    <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.5 }}>
+                      {pt.heatmapReason}
                     </p>
-                  ) : (
-                    <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic', lineHeight: 1.5 }}>
-                      Look for strips with heavy activity (dark bands) at the time position where this issue likely occurs.
-                    </p>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             )
           })}

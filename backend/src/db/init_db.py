@@ -34,7 +34,19 @@ def init_db() -> None:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE journeys ADD COLUMN embedding TEXT"))
 
+    if "solution_eval" not in journey_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE journeys ADD COLUMN solution_eval TEXT"))
+
     screenshot_columns = {column["name"] for column in inspector.get_columns("screenshots")}
     if "action_id" not in screenshot_columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE screenshots ADD COLUMN action_id VARCHAR(64)"))
+
+    task_columns = {col["name"] for col in inspector.get_columns("tasks")}
+    if "focus_areas" not in task_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN focus_areas TEXT"))
+    if "expected_solution" not in task_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN expected_solution TEXT"))

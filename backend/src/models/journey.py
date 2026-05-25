@@ -35,6 +35,7 @@ class Journey(Base):
     source: Mapped[str] = mapped_column(String(32), nullable=False, default='agent')  # 'agent' | 'policy_bot'
     is_agent: Mapped[bool | None] = mapped_column(nullable=True, default=None)
     embedding: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)  # JSON float array
+    solution_eval: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)  # JSON dict
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

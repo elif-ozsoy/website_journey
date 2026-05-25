@@ -6,11 +6,15 @@ from pydantic import BaseModel
 class TaskCreate(BaseModel):
     title: str
     description: str | None = None
+    focus_areas: list[str] | None = None
+    expected_solution: str | None = None
 
 
 class TaskUpdate(BaseModel):
     title: str
     description: str | None = None
+    focus_areas: list[str] | None = None
+    expected_solution: str | None = None
 
 
 class TaskResponse(BaseModel):
@@ -20,6 +24,8 @@ class TaskResponse(BaseModel):
     description: str | None
     order_index: int
     created_at: datetime
+    focus_areas: list[str] | None = None
+    expected_solution: str | None = None
 
     model_config = {"from_attributes": True}
 

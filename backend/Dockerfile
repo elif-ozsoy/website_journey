@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS base
+FROM mcr.microsoft.com/playwright/python:v1.50.0-noble AS base
 
 ########################
 # Install Dependencies #
@@ -7,11 +7,9 @@ FROM python:3.12-slim AS base
 # Copy requirements.txt to container
 COPY requirements.txt /tmp/requirements.txt
 
-# Upgrade pip and install Python requirements
-RUN pip3 install --upgrade pip ; \
-    pip3 install --no-cache -r /tmp/requirements.txt ; \
-    python -m playwright install --with-deps chromium
-    # playwright install chromium --with-deps 2>/dev/null || true
+# Upgrade pip and install Python requirements (Chromium already present in base image)
+RUN pip3 install --upgrade pip && \
+    pip3 install --no-cache -r /tmp/requirements.txt
 
 
 ###########

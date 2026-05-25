@@ -1,4 +1,4 @@
-import type { Task, Session, EventRow } from './types'
+import type { Task, Session, EventRow, FocusArea } from './types'
 
 const BASE = '/api'
 
@@ -93,22 +93,58 @@ export function createProject(url: string, label: string) {
 
 // ─── Tasks ───────────────────────────────────────────────────────────────────
 
+function normalizeTask(t: Record<string, unknown>): Task {
+  return {
+    id: t.id as number,
+    siteId: (t.site_id ?? t.siteId) as string,
+    title: t.title as string,
+    description: (t.description ?? null) as string | null,
+    orderIndex: (t.order_index ?? t.orderIndex ?? 0) as number,
+    createdAt: (t.created_at ?? t.createdAt ?? '') as string,
+    focusAreas: (t.focus_areas as FocusArea[] | undefined) ?? undefined,
+    expectedSolution: (t.expected_solution as string | undefined) ?? undefined,
+  }
+}
+
 export function listTasks(siteId: string) {
-  return request<Task[]>(`/v1/sites/${siteId}/tasks`)
+  return request<Record<string, unknown>[]>(`/v1/sites/${siteId}/tasks`)
+    .then(items => items.map(normalizeTask))
 }
 
-export function createTask(siteId: string, title: string, description?: string) {
-  return request<Task>(`/v1/sites/${siteId}/tasks`, {
+export function createTask(
+  siteId: string,
+  title: string,
+  description?: string,
+  focusAreas?: FocusArea[],
+  expectedSolution?: string,
+) {
+  return request<Record<string, unknown>>(`/v1/sites/${siteId}/tasks`, {
     method: 'POST',
-    body: JSON.stringify({ title, description: description ?? null }),
-  })
+    body: JSON.stringify({
+      title,
+      description: description ?? null,
+      focus_areas: focusAreas ?? null,
+      expected_solution: expectedSolution ?? null,
+    }),
+  }).then(normalizeTask)
 }
 
-export function updateTask(taskId: number, title: string, description?: string) {
-  return request<Task>(`/v1/tasks/${taskId}`, {
+export function updateTask(
+  taskId: number,
+  title: string,
+  description?: string,
+  focusAreas?: FocusArea[],
+  expectedSolution?: string,
+) {
+  return request<Record<string, unknown>>(`/v1/tasks/${taskId}`, {
     method: 'PUT',
-    body: JSON.stringify({ title, description: description ?? null }),
-  })
+    body: JSON.stringify({
+      title,
+      description: description ?? null,
+      focus_areas: focusAreas ?? null,
+      expected_solution: expectedSolution ?? null,
+    }),
+  }).then(normalizeTask)
 }
 
 export function deleteTask(taskId: number) {
@@ -131,6 +167,13 @@ export function listEvents(sessionId: string, limit = 500) {
 
 // ─── Journeys ────────────────────────────────────────────────────────────────
 
+export interface SolutionEval {
+  result: 'correct' | 'partially_correct' | 'false_or_misleading'
+  reason: string
+  expected_solution?: string
+  agent_answer?: string
+}
+
 export interface JourneyResponse {
   id: number
   site_id: string
@@ -144,6 +187,7 @@ export interface JourneyResponse {
   source: string
   is_agent: boolean | null
   embedding: number[] | null
+  solution_eval?: SolutionEval | null
   completed_at: string
   updated_at: string
 }
@@ -155,7 +199,7 @@ export interface ProjectWithJourneys {
   label: string | null
   target_url: string
   created_at: string
-  tasks: { id: number; title: string; description: string | null; order_index: number }[]
+  tasks: { id: number; title: string; description: string | null; order_index: number; focus_areas?: string[] | null; expected_solution?: string | null }[]
   journeys: JourneyResponse[]
 }
 
@@ -180,8 +224,13 @@ export function saveJourney(
   })
 }
 
-export function listSiteJourneys(siteId: string, source?: string) {
-  const qs = source ? `?source=${encodeURIComponent(source)}` : ''
+export function listSiteJourneys(siteId: string, source?: string, taskId?: number) {
+  const params = new URLSearchParams()
+  if (source) params.set('source', source)
+  if (taskId != null) params.set('task_id', String(taskId))
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  console.log(`Requesting journeys for siteId=${siteId}, source=${source}, taskId=${taskId}`)
+  console.log(`params printed:`, params.toString())
   return request<JourneyResponse[]>(`/v1/sites/${siteId}/journeys${qs}`)
 }
 

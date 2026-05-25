@@ -4,7 +4,7 @@ import { useProjectContext } from '../context/ProjectContext'
 import * as api from '../lib/api'
 import InputForm from '../components/agent/InputForm'
 import StatusBar from '../components/agent/StatusBar'
-import type { AgentStep, RunConfig, WsMessage } from '../components/agent/agentTypes'
+import type { AgentStep, RunConfig, WsMessage, SolutionEval } from '../components/agent/agentTypes'
 import { getStepsFromSessionEvents } from '../components/dashboard/screenshotData'
 
 import SankeyDiagram from '../components/agent/SankeyDiagram'
@@ -58,6 +58,7 @@ export default function AgentRunPage() {
   const [steps, setSteps] = useState<AgentStep[]>([])
   const [humanJourneys, setHumanJourneys] = useState<AgentStep[][]>([])
   const [errorMessage, setErrorMessage] = useState('')
+  const [solutionEval, setSolutionEval] = useState<SolutionEval | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const isRunningRef = useRef(false)
 
@@ -127,6 +128,7 @@ export default function AgentRunPage() {
     setAppState('running')
     setSteps([])
     setErrorMessage('')
+    setSolutionEval(null)
     setStatusMessage('Connecting…')
 
     const wsProtocol = agentUrl.startsWith('https') ? 'wss:' : 'ws:'
@@ -145,6 +147,7 @@ export default function AgentRunPage() {
       else if (msg.type === 'step') { setSteps((prev) => [...prev, msg.data]); setStatusMessage(`Step ${msg.data.step_number} — ${msg.data.action_type}`) }
       else if (msg.type === 'complete') {
           isRunningRef.current = false; setAppState('complete'); setStatusMessage(`Done — ${msg.data.total_steps} steps recorded`)
+          if (msg.data.solution_eval) setSolutionEval(msg.data.solution_eval)
           try { localStorage.setItem(`ciphercorgi_agent_run_${siteId}`, JSON.stringify({ siteId, steps: msg.data.steps, completedAt: Date.now() })) } catch { /* ignore */ }
           if (siteId) {
             api.saveJourney(siteId, config.task, msg.data.steps).catch(() => {/* non-fatal */})
@@ -196,11 +199,38 @@ export default function AgentRunPage() {
                 <div style={{ height: '100%', overflowY: 'auto' }}>
                   <JourneyVisualization steps={steps} humanJourneys={humanJourneys} isComplete={appState === 'complete'} />
                   {appState === 'complete' && (
-                    <div style={{ padding: '32px 0', display: 'flex', justifyContent: 'center' }}>
+                    <div style={{ padding: '32px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: '#fff', border: '1px solid var(--gray200)', borderRadius: 999 }}>
                         <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--brand)', display: 'inline-block' }} />
                         <span style={{ fontWeight: 700 }}>Journey Finalized</span>
                       </div>
+                      {solutionEval && (
+                        <div style={{
+                          display: 'flex', flexDirection: 'column', gap: 4,
+                          padding: '10px 18px', borderRadius: 10, maxWidth: 480,
+                          background: solutionEval.result === 'correct' ? '#dcfce7'
+                                    : solutionEval.result === 'partially_correct' ? '#fef3c7'
+                                    : '#fee2e2',
+                          border: '1px solid',
+                          borderColor: solutionEval.result === 'correct' ? '#16a34a'
+                                     : solutionEval.result === 'partially_correct' ? '#d97706'
+                                     : '#dc2626',
+                        }}>
+                          <div style={{
+                            fontWeight: 700, fontSize: 'var(--fs-body)',
+                            color: solutionEval.result === 'correct' ? '#15803d'
+                                 : solutionEval.result === 'partially_correct' ? '#b45309'
+                                 : '#b91c1c',
+                          }}>
+                            {solutionEval.result === 'correct' ? '✓ Correct'
+                             : solutionEval.result === 'partially_correct' ? '◑ Partially Correct'
+                             : '✗ False / Misleading'}
+                          </div>
+                          <div style={{ fontSize: 'var(--fs-small)', color: 'var(--gray700)', lineHeight: 1.5 }}>
+                            {solutionEval.reason}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useRef, type ReactNode } from 'react'
 import type { Task, Agent } from '../lib/types'
-import type { AgentStep, WsMessage } from '../components/agent/agentTypes'
+import type { AgentStep, AgentResult, WsMessage } from '../components/agent/agentTypes'
 import * as api from '../lib/api'
 
 export type AgentRunState = 'idle' | 'running' | 'complete' | 'error'
@@ -46,7 +46,7 @@ function runSingleTask(
   userToken?: string,
   model?: string,
   agentPersona?: string,
-): Promise<AgentStep[]> {
+): Promise<AgentResult> {
   return new Promise((resolve, reject) => {
     const wsProtocol = agentUrl.startsWith('https') ? 'wss:' : 'ws:'
     const wsHost = agentUrl.replace(/^https?:\/\//, '')
@@ -70,7 +70,7 @@ function runSingleTask(
       const msg: WsMessage = JSON.parse(event.data)
       if (msg.type === 'status') onStatus(msg.message)
       else if (msg.type === 'step') onStep(msg.data)
-      else if (msg.type === 'complete') { resolve(msg.data.steps); ws.close() }
+      else if (msg.type === 'complete') { resolve(msg.data); ws.close() }
       else if (msg.type === 'error') { reject(new Error(msg.message)); ws.close() }
     }
     ws.onerror = () => reject(new Error('WebSocket connection failed — is the agent backend running?'))
@@ -127,7 +127,7 @@ export function AgentRunProvider({ children }: { children: ReactNode }) {
     setRunningSiteId(siteId)
     setRunningVersionId(versionId ?? null)
 
-    const agentUrl = window.location.origin
+    const agentUrl = import.meta.env.VITE_BACKEND_URL ?? import.meta.env.VITE_AGENT_URL ?? window.location.origin
     const allSteps: AgentStep[] = []
 
     // If specific agents are selected, run all tasks once per agent; otherwise one pass
@@ -162,7 +162,7 @@ export function AgentRunProvider({ children }: { children: ReactNode }) {
             ? ` Pay special attention to: ${task.focusAreas.join(', ')}.`
             : ''
           const taskPrompt = `${task.title}${task.description ? '. ' + task.description : ''}${focusPart}`
-          const steps = await runSingleTask(
+          const result = await runSingleTask(
             taskPrompt,
             siteUrl,
             provider,
@@ -181,8 +181,8 @@ export function AgentRunProvider({ children }: { children: ReactNode }) {
             agentRun.model,
             agentRun.persona,
           )
-          allSteps.push(...steps)
-          setTotalCompletedSteps(prev => prev + steps.length)
+          allSteps.push(...result.steps)
+          setTotalCompletedSteps(prev => prev + result.steps.length)
         } catch (err) {
           if (!isRunningRef.current) return
           isRunningRef.current = false
