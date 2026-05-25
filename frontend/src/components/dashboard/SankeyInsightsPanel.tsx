@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import type { ComparativeAnalysis, ActionPointItem, JourneyResponse } from '../../lib/api'
 import * as api from '../../lib/api'
 import type { AgentStep } from '../agent/agentTypes'
+import type { NodeDivergence } from './SankeyDiagram'
 
 const AGENT_COLOR = '#185FA5'
 const HUMAN_COLOR = '#0d9488'
@@ -80,38 +81,24 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
+function truncate(s: string, max: number) {
+  return s.length > max ? s.slice(0, max - 1) + '…' : s
+}
+
 export default function SankeyInsightsPanel({
   compareAnalysis,
   compareLoading,
   agentJourneys,
   humanJourneySteps,
+  divergences = [],
 }: {
   compareAnalysis: ComparativeAnalysis | null
   compareLoading: boolean
   agentJourneys: JourneyResponse[]
   humanJourneySteps: AgentStep[][]
+  divergences?: NodeDivergence[]
 }) {
   const [activeTab, setActiveTab] = useState<'guide' | 'insights'>('insights')
-
-  // ── Divergence: pages visited by one side but not the other ─────────────
-  const divergence = useMemo(() => {
-    const agentPages = new Set<string>()
-    const humanPages = new Set<string>()
-    for (const j of agentJourneys)
-      for (const step of (j.steps as AgentStep[]))
-        if (step.url?.startsWith('http')) {
-          try { agentPages.add(new URL(step.url).pathname) } catch { agentPages.add(step.url) }
-        }
-    for (const steps of humanJourneySteps)
-      for (const step of steps)
-        if (step.url?.startsWith('http')) {
-          try { humanPages.add(new URL(step.url).pathname) } catch { humanPages.add(step.url) }
-        }
-    return {
-      agentOnly: [...agentPages].filter(p => !humanPages.has(p)),
-      humanOnly: [...humanPages].filter(p => !agentPages.has(p)),
-    }
-  }, [agentJourneys, humanJourneySteps])
 
   // ── Action points linked to the Sankey diagram ───────────────────
   const sankeyPoints = useMemo<SankeyActionPoint[]>(() => {
@@ -142,15 +129,18 @@ export default function SankeyInsightsPanel({
     const agentStepCounts = agentJourneys.map(j => j.total_steps).filter(n => n > 0)
     const humanStepCounts = humanJourneySteps.map(s => s.length).filter(n => n > 0)
     const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null
+    const divergentMilestones = divergences.map(d =>
+      `${d.nodeName} (${d.groups.map(g => `"${truncate(g.label, 30)}"`).join(' vs ')})`
+    )
     return {
       agent_avg_steps: avg(agentStepCounts),
       human_avg_steps: avg(humanStepCounts),
       agent_journey_count: agentJourneys.length,
       human_journey_count: humanJourneySteps.length,
-      agent_only_pages: divergence.agentOnly.length,
-      human_only_pages: divergence.humanOnly.length,
+      divergence_count: divergences.length,
+      divergent_milestones: divergentMilestones.slice(0, 4).join('; ') || null,
     }
-  }, [agentJourneys, humanJourneySteps, divergence])
+  }, [agentJourneys, humanJourneySteps, divergences])
 
   const [explanations, setExplanations] = useState<Record<string, string>>({})
   const [expLoading, setExpLoading] = useState<Record<string, boolean>>({})
@@ -168,7 +158,7 @@ export default function SankeyInsightsPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pointIds])
 
-  const hasDivergence = divergence.agentOnly.length > 0 || divergence.humanOnly.length > 0
+  const hasDivergence = divergences.length > 0
   const insightCount = sankeyPoints.length + (hasDivergence ? 1 : 0)
 
   return (
@@ -187,38 +177,44 @@ export default function SankeyInsightsPanel({
           <div>
             <SectionLabel>What is a Sankey diagram?</SectionLabel>
             <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.7 }}>
-              A Sankey diagram shows how users navigated between pages. Each <strong>rectangle is a page</strong>; the curved ribbons between them are transitions. Pages are laid out left-to-right, roughly in visit order.
+              A Sankey diagram shows how AI agents and humans moved through the website's milestone stages. Each <strong>rectangle is a milestone</strong> (e.g. navigation click, page view, form input); the curved ribbons between them show how journeys progressed from one stage to the next.
             </p>
           </div>
 
           <div>
             <SectionLabel>Reading ribbon widths</SectionLabel>
             <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.7 }}>
-              Ribbon width reflects <strong>how many navigation steps</strong> were recorded between two pages — not the number of distinct journeys. A single session that bounced between the same two pages repeatedly will produce a wide ribbon.
+              Ribbon width reflects <strong>how many navigation steps</strong> were recorded between two milestones — not the number of distinct journeys. A single session that spent many steps transitioning between two stages will produce a wide ribbon.
             </p>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <SectionLabel>Node colours</SectionLabel>
-            <LegendRow color={AGENT_COLOR} label="AI agent" sub="page visited only by the agent" />
-            <LegendRow color={HUMAN_COLOR} label="Human" sub="page visited only by human sessions" />
-            <LegendRow color="#1e293b" label="Both" sub="page visited by both agent and humans" />
+            <LegendRow color={AGENT_COLOR} label="AI agent" sub="milestone reached only by agent runs" />
+            <LegendRow color={HUMAN_COLOR} label="Human" sub="milestone reached only by human sessions" />
+            <LegendRow color="#1e293b" label="Both" sub="milestone reached by both AI and humans" />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <SectionLabel>Special indicators</SectionLabel>
             <div style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.6 }}>
-              <strong>⟳ prefix</strong> — that page was revisited more than twice in a single journey (a navigation loop). The loop node is shown separately to keep the diagram readable.
+              <strong>⟳ prefix</strong> — that milestone was revisited more than twice in a single journey (a loop). The loop node is shown separately to keep the diagram readable.
             </div>
             <div style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.6 }}>
-              <strong style={{ color: '#f59e0b' }}>⬛ exit</strong> — the page had no outgoing navigations; users left or completed their task here.
+              <strong style={{ color: '#f59e0b' }}>⬛ exit</strong> — the milestone had no outgoing transitions; that journey ended here.
             </div>
           </div>
 
           <div>
-            <SectionLabel>Divergence</SectionLabel>
+            <SectionLabel>Path divergence</SectionLabel>
             <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.7 }}>
-              Pages visited by only one side appear in a single colour. When the agent and human paths share no overlap for a particular page, that page will show as pure AI-blue or human-teal — a clear sign of behavioural divergence.
+              When multiple journeys reach the same milestone but then interact with <strong>different elements</strong> to continue, that node is marked with a{' '}
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 14, height: 14, borderRadius: '50%', background: '#f59e0b',
+                color: '#fff', fontSize: '0.6rem', fontWeight: 800, verticalAlign: 'middle',
+              }}>⚡</span>{' '}
+              amber badge. This is a <em>divergence</em> — not just one journey splitting in two, but potentially many journeys each taking a distinct path through that milestone. The panel to the right lists every divergent milestone and which element each journey clicked.
             </p>
           </div>
         </div>
@@ -239,45 +235,36 @@ export default function SankeyInsightsPanel({
           {hasDivergence && (
             <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: 99, background: '#ede9fe', color: '#7c3aed' }}>
-                  DIVERGENCE
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 16, height: 16, borderRadius: '50%', background: '#f59e0b',
+                  color: '#fff', fontSize: '0.6rem', fontWeight: 800, flexShrink: 0,
+                }}>⚡</span>
+                <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: 99, background: '#fef3c7', color: '#92400e' }}>
+                  {divergences.length} DIVERGENCE{divergences.length !== 1 ? 'S' : ''} DETECTED
                 </span>
-                <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)' }}>Path split between AI and humans</span>
               </div>
-              <p style={{ margin: 0, fontSize: 'var(--fs-small)', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.5 }}>
-                Agent and human journeys visited different pages — look for single-colour nodes in the diagram.
+              <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.5 }}>
+                At {divergences.length} milestone{divergences.length !== 1 ? 's' : ''}, different journeys interacted with different elements. Look for the ⚡ badge on nodes in the diagram.
               </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {divergence.agentOnly.length > 0 && (
-                  <div>
-                    <div style={{ fontSize: '10px', fontWeight: 700, color: AGENT_COLOR, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>
-                      AI only ({divergence.agentOnly.length})
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {divergences.map(d => (
+                  <div key={d.nodeId} style={{
+                    paddingLeft: 10, borderLeft: '2px solid #fbbf24',
+                    display: 'flex', flexDirection: 'column', gap: 3,
+                  }}>
+                    <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: '#78350f' }}>
+                      {d.nodeName} · {d.groups.length} paths
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {divergence.agentOnly.slice(0, 5).map(p => (
-                        <span key={p} style={{ fontSize: 'var(--fs-small)', color: AGENT_COLOR, background: `${AGENT_COLOR}12`, borderRadius: 4, padding: '2px 7px', fontFamily: 'var(--font-sans)' }}>{p}</span>
-                      ))}
-                      {divergence.agentOnly.length > 5 && (
-                        <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>+{divergence.agentOnly.length - 5} more</span>
-                      )}
-                    </div>
+                    {d.groups.map((g, gi) => (
+                      <div key={gi} style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                        <span style={{ color: '#b45309', fontWeight: 700, flexShrink: 0 }}>•</span>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>"{truncate(g.label, 44)}"</span>
+                        <span style={{ color: 'var(--gray400)', flexShrink: 0 }}>({g.visits.length})</span>
+                      </div>
+                    ))}
                   </div>
-                )}
-                {divergence.humanOnly.length > 0 && (
-                  <div>
-                    <div style={{ fontSize: '10px', fontWeight: 700, color: HUMAN_COLOR, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>
-                      Human only ({divergence.humanOnly.length})
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {divergence.humanOnly.slice(0, 5).map(p => (
-                        <span key={p} style={{ fontSize: 'var(--fs-small)', color: HUMAN_COLOR, background: `${HUMAN_COLOR}12`, borderRadius: 4, padding: '2px 7px', fontFamily: 'var(--font-sans)' }}>{p}</span>
-                      ))}
-                      {divergence.humanOnly.length > 5 && (
-                        <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>+{divergence.humanOnly.length - 5} more</span>
-                      )}
-                    </div>
-                  </div>
-                )}
+                ))}
               </div>
             </div>
           )}

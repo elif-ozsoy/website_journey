@@ -6,7 +6,7 @@ import type { Project } from '../lib/types'
 import { PROJECTS_STORAGE_KEY } from '../lib/types'
 import * as api from '../lib/api'
 
-import SankeyDiagram from '../components/dashboard/SankeyDiagram'
+import SankeyDiagram, { type NodeDivergence } from '../components/dashboard/SankeyDiagram'
 
 
 // ─── Re-evaluate modal ────────────────────────────────────────────────────────
@@ -418,6 +418,7 @@ export default function DashboardPage() {
 
   const [agentFilter, setAgentFilter] = useState<Set<string> | null>(null)
   const [sessionFilter, setSessionFilter] = useState<Set<string> | null>(null)
+  const [sankeyDivergences, setSankeyDivergences] = useState<NodeDivergence[]>([])
 
   const [searchParams, setSearchParams] = useSearchParams()
   const urlView = searchParams.get('view') ?? 'overview'
@@ -852,6 +853,7 @@ useEffect(() => {
                   humanJourneys={humanJourneySteps}
                   agentLabels={agentJourneys.map((_, i) => `AI Run #${i + 1}`)}
                   humanLabels={humanJourneyMeta.map(j => j.label)}
+                  onDivergencesChange={setSankeyDivergences}
                 />
               )}
             </div>
@@ -862,6 +864,7 @@ useEffect(() => {
                 compareLoading={compareLoading}
                 agentJourneys={agentJourneys as api.JourneyResponse[]}
                 humanJourneySteps={humanJourneySteps}
+                divergences={sankeyDivergences}
               />
             </div>
           </div>
