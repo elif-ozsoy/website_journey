@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { useProjectContext } from '../context/ProjectContext'
+import { useAgentRun } from '../context/AgentRunContext'
 import type { Project } from '../lib/types'
 import { PROJECTS_STORAGE_KEY } from '../lib/types'
 import * as api from '../lib/api'
@@ -44,12 +45,12 @@ function ReEvalModal({ onClose, onConfirm }: { onClose: () => void; onConfirm: (
   )
 }
 
-import ScreenshotCarousel from '../components/dashboard/ScreenshotCarousel'
 import AggregateFlowView from '../components/dashboard/AggregateFlowView'
 import ActionPointsList from '../components/dashboard/ActionPointsList'
 import HeatmapCarousel from '../components/dashboard/HeatmapCarousel'
 import ComparePanel from '../components/dashboard/ComparePanel'
 import SankeyInsightsPanel from '../components/dashboard/SankeyInsightsPanel'
+
 import {
   getStepsFromSessionEvents,
   getTaskJourneysFromSessionEvents,
@@ -57,15 +58,16 @@ import {
   getAggregatedScreenshots,
   type HumanTaskJourney,
 } from '../components/dashboard/screenshotData'
-import type { Session, Task } from '../lib/types'
+import type { Session } from '../lib/types'
 import { ANALYSIS_STORAGE_KEY, VERSIONS_KEY, VersionEntry, getVersions } from './EvaluationPage'
 import type { AgentStep } from '../components/agent/agentTypes'
+import type { CompareHighlight, DiagramRef } from '../lib/api'
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
 interface SelectOption { id: string; name: string; meta?: string }
 
-type ActiveView = 'overview' | 'aggregate' | 'heatmap' | 'details' | 'human_vs_ai' | 'time_event' | 'flow_sankey'
+type ActiveView = 'overview' | 'aggregate' | 'heatmap' | 'human_vs_ai' | 'time_event' | 'flow_sankey'
 // ─── Nav item icons ───────────────────────────────────────────────────────────
 
 // ─── Filter pills ─────────────────────────────────────────────────────────────
@@ -125,7 +127,6 @@ function SettingsPanel({
   agentFilter, sessionFilter,
   onToggleAgent, onSelectAllAgents,
   onToggleSession, onSelectAllSessions,
-  showHeatmap, onToggleHeatmap,
 }: {
   agentOptions: SelectOption[]
   sessionOptions: SelectOption[]
@@ -135,8 +136,6 @@ function SettingsPanel({
   onSelectAllAgents: () => void
   onToggleSession: (id: string) => void
   onSelectAllSessions: () => void
-  showHeatmap: boolean
-  onToggleHeatmap: () => void
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -193,9 +192,9 @@ function SettingsPanel({
           <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
             <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: 9 }}>AI Agents</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              <FilterPill label="All" active={agentAllSelected} color="var(--accent)" onClick={onSelectAllAgents} />
+              <FilterPill label="All" active={agentAllSelected} color="#32494B" onClick={onSelectAllAgents} />
               {agentOptions.map(o => (
-                <FilterPill key={o.id} label={o.name} active={agentAllSelected || agentFilter!.has(o.id)} color="var(--accent)" onClick={() => onToggleAgent(o.id)} />
+                <FilterPill key={o.id} label={o.name} active={agentAllSelected || agentFilter!.has(o.id)} color="#32494B" onClick={() => onToggleAgent(o.id)} />
               ))}
               {agentOptions.length === 0 && <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-muted)' }}>No agents run yet</span>}
             </div>
@@ -203,16 +202,12 @@ function SettingsPanel({
           <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
             <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: 9 }}>Human Sessions</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              <FilterPill label="All" active={sessionAllSelected} color="var(--teal)" onClick={onSelectAllSessions} />
+              <FilterPill label="All" active={sessionAllSelected} color="#881342" onClick={onSelectAllSessions} />
               {sessionOptions.map((o, i) => (
-                <FilterPill key={o.id} label={`User ${i + 1}`} active={sessionAllSelected || sessionFilter!.has(o.id)} color="var(--teal)" onClick={() => onToggleSession(o.id)} />
+                <FilterPill key={o.id} label={`User ${i + 1}`} active={sessionAllSelected || sessionFilter!.has(o.id)} color="#881342" onClick={() => onToggleSession(o.id)} />
               ))}
               {sessionOptions.length === 0 && <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-muted)' }}>No sessions yet</span>}
             </div>
-          </div>
-          <div style={{ padding: '12px 16px' }}>
-            <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: 4 }}>Display</div>
-            <ToggleRow label="Click heatmap" description="Overlay click positions on screenshots" checked={showHeatmap} onChange={onToggleHeatmap} />
           </div>
         </div>
       )}
@@ -222,182 +217,6 @@ function SettingsPanel({
 
 // ─── Trajectory view ──────────────────────────────────────────────────────────
 
-const STEP_ACTION_COLORS: Record<string, string> = {
-  click_element: '#185FA5',
-  input_text: '#059669',
-  go_to_url: '#d97706',
-  scroll: '#0891b2',
-  go_back: '#f43f5e',
-  extract_content: '#7c3aed',
-  done: '#16a34a',
-}
-
-function TrajectoryView({
-  tasks,
-  agentJourneys,
-  sessions,
-  humanStepsBySession,
-  humanLoading,
-}: {
-  tasks: Task[]
-  agentJourneys: api.JourneyResponse[]
-  sessions: Session[]
-  humanStepsBySession: Map<string, AgentStep[]>
-  humanLoading: boolean
-}) {
-  const [taskId, setTaskId] = useState<number | null>(null)
-  const [testerKey, setTesterKey] = useState<string | null>(null)
-  const [stepIdx, setStepIdx] = useState(0)
-  const stepListRef = useRef<HTMLDivElement>(null)
-
-  type TesterOption = {
-    key: string
-    kind: 'agent' | 'human'
-    label: string
-    meta: string
-    steps: AgentStep[]
-  }
-
-  const testerOptions = useMemo<TesterOption[]>(() => {
-    const opts: TesterOption[] = []
-    let runIdx = 0
-    agentJourneys.filter(j => taskId === null || j.task_id === taskId).forEach(j => {
-      runIdx++
-      opts.push({ key: `agent-${j.id}`, kind: 'agent', label: `AI Run #${runIdx}`, meta: j.task_title || '', steps: (j.steps ?? []) as AgentStep[] })
-    })
-    sessions.forEach((s, i) => {
-      opts.push({ key: `human-${s.id}`, kind: 'human', label: `User ${i + 1}`, meta: new Date(s.startedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }), steps: humanStepsBySession.get(s.id) ?? [] })
-    })
-    return opts
-  }, [agentJourneys, sessions, humanStepsBySession, taskId])
-
-  useEffect(() => {
-    if (!testerKey || !testerOptions.find(t => t.key === testerKey)) {
-      setTesterKey(testerOptions[0]?.key ?? null)
-      setStepIdx(0)
-    }
-  }, [testerOptions]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const activeTester = testerOptions.find(t => t.key === testerKey) ?? null
-  const steps = activeTester?.steps ?? []
-  const activeStep = steps[stepIdx] ?? null
-
-  useEffect(() => {
-    const container = stepListRef.current
-    if (!container) return
-    const el = container.querySelector<HTMLElement>(`[data-step="${stepIdx}"]`)
-    if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [stepIdx])
-
-  const screenshotSrc = activeStep
-    ? (activeStep.screenshot_url ?? (activeStep.screenshot_base64 ? `data:image/png;base64,${activeStep.screenshot_base64}` : null))
-    : null
-
-  return (
-    <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-      <div style={{ width: 300, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
-        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--gray400)', marginBottom: 5 }}>Task</div>
-          <select
-            style={{ width: '100%', fontSize: 'var(--fs-body)', padding: '5px 8px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', cursor: 'pointer' }}
-            value={taskId ?? ''}
-            onChange={e => { setTaskId(e.target.value !== '' ? Number(e.target.value) : null); setTesterKey(null); setStepIdx(0) }}
-          >
-            <option value="">All tasks</option>
-            {tasks.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
-          </select>
-        </div>
-        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--gray400)', marginBottom: 7 }}>Tester</div>
-          {testerOptions.length === 0 ? (
-            <div style={{ fontSize: 'var(--fs-small)', color: 'var(--text-muted)', fontStyle: 'italic' }}>{humanLoading ? 'Loading…' : 'No data yet'}</div>
-          ) : (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-              {testerOptions.map(opt => {
-                const isActive = testerKey === opt.key
-                const activeColor = opt.kind === 'agent' ? 'var(--accent)' : 'var(--teal)'
-                return (
-                  <button key={opt.key} onClick={() => { setTesterKey(opt.key); setStepIdx(0) }} title={opt.meta}
-                    style={{ padding: '3px 10px', borderRadius: 999, border: 'none', cursor: 'pointer', fontSize: 'var(--fs-small)', fontWeight: 600, fontFamily: 'var(--font-sans)', background: isActive ? activeColor : 'var(--gray100)', color: isActive ? '#fff' : 'var(--text-secondary)', transition: 'background 0.13s, color 0.13s' }}
-                  >{opt.label}</button>
-                )
-              })}
-            </div>
-          )}
-        </div>
-        <div ref={stepListRef} style={{ flex: 1, overflowY: 'auto' }}>
-          {steps.length === 0 ? (
-            <div style={{ padding: 16, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', fontStyle: 'italic', lineHeight: 1.6 }}>
-              {!activeTester ? 'Select a tester above.' : humanLoading && activeTester.kind === 'human' ? 'Loading session data…' : 'No steps recorded.'}
-            </div>
-          ) : steps.map((step, i) => {
-            const isActive = i === stepIdx
-            let path = step.url
-            try { path = new URL(step.url).pathname || '/' } catch { /* ok */ }
-            const actionColor = STEP_ACTION_COLORS[step.action_type] ?? '#475569'
-            return (
-              <div key={i} data-step={i} onClick={() => setStepIdx(i)}
-                style={{ padding: '7px 14px', cursor: 'pointer', background: isActive ? 'var(--accent-soft)' : 'transparent', borderLeft: isActive ? '3px solid var(--accent)' : '3px solid transparent', borderBottom: '1px solid var(--gray100)', transition: 'background 0.1s' }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                  <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: isActive ? 'var(--accent)' : 'var(--gray400)', minWidth: 16, textAlign: 'right', flexShrink: 0 }}>{i + 1}</span>
-                  <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: actionColor, background: `${actionColor}18`, padding: '1px 5px', borderRadius: 4 }}>{step.action_type.replace(/_/g, ' ')}</span>
-                </div>
-                <div style={{ fontSize: 'var(--fs-small)', color: isActive ? 'var(--accent)' : 'var(--text-secondary)', fontFamily: 'var(--font-sans)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 22 }}>{path}</div>
-                {step.thought && <div style={{ fontSize: 'var(--fs-small)', color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 22, lineHeight: 1.4 }}>{step.thought.slice(0, 58)}{step.thought.length > 58 ? '…' : ''}</div>}
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#0f172a' }}>
-        {!activeTester ? (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', fontSize: 'var(--fs-body)', flexDirection: 'column', gap: 10 }}>
-            <span style={{ fontSize: 'var(--fs-headline)' }}>↑</span>Select a tester to view their trajectory.
-          </div>
-        ) : steps.length === 0 ? (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', fontSize: 'var(--fs-body)', flexDirection: 'column', gap: 8 }}>
-            {humanLoading ? <><span style={{ width: 18, height: 18, border: '2px solid #334155', borderTopColor: '#64748b', borderRadius: '50%', animation: 'spin 0.7s linear infinite', display: 'inline-block' }} />Loading session data…</> : 'No steps recorded.'}
-          </div>
-        ) : (
-          <>
-            <div style={{ padding: '8px 16px', background: '#1e293b', borderBottom: '1px solid #334155', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button onClick={() => setStepIdx(Math.max(0, stepIdx - 1))} disabled={stepIdx === 0}
-                  style={{ background: 'none', border: '1px solid #334155', color: stepIdx === 0 ? '#334155' : '#94a3b8', borderRadius: 6, width: 24, height: 24, cursor: stepIdx === 0 ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'var(--fs-small)', flexShrink: 0 }}>‹</button>
-                <span style={{ fontSize: 'var(--fs-small)', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>{stepIdx + 1} / {steps.length}</span>
-                <button onClick={() => setStepIdx(Math.min(steps.length - 1, stepIdx + 1))} disabled={stepIdx === steps.length - 1}
-                  style={{ background: 'none', border: '1px solid #334155', color: stepIdx === steps.length - 1 ? '#334155' : '#94a3b8', borderRadius: 6, width: 24, height: 24, cursor: stepIdx === steps.length - 1 ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'var(--fs-small)', flexShrink: 0 }}>›</button>
-              </div>
-              {activeStep && (
-                <>
-                  <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: STEP_ACTION_COLORS[activeStep.action_type] ?? '#64748b', background: `${STEP_ACTION_COLORS[activeStep.action_type] ?? '#64748b'}20`, padding: '2px 7px', borderRadius: 5 }}>{activeStep.action_type.replace(/_/g, ' ')}</span>
-                  <span style={{ fontSize: 'var(--fs-small)', color: '#94a3b8', fontFamily: 'var(--font-sans)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{activeStep.url}</span>
-                </>
-              )}
-            </div>
-            <div style={{ flex: 1, overflow: 'auto', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20 }}>
-              {screenshotSrc ? (
-                <img src={screenshotSrc} alt={`Step ${stepIdx + 1}`} style={{ maxWidth: '100%', borderRadius: 6, boxShadow: '0 6px 28px rgba(0,0,0,0.5)' }} />
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 220, color: '#475569', fontSize: 'var(--fs-body)', flexDirection: 'column', gap: 8 }}>
-                  <span style={{ fontSize: 'var(--fs-headline)' }}>📷</span>No screenshot for this step
-                </div>
-              )}
-            </div>
-            {activeStep && (activeStep.thought || activeStep.next_goal) && (
-              <div style={{ flexShrink: 0, background: '#1e293b', borderTop: '1px solid #334155', padding: '10px 16px', maxHeight: 130, overflowY: 'auto' }}>
-                {activeStep.thought && <div style={{ marginBottom: activeStep.next_goal ? 8 : 0 }}><span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#475569' }}>Thought</span><div style={{ fontSize: 'var(--fs-body)', color: '#94a3b8', marginTop: 3, lineHeight: 1.6 }}>{activeStep.thought}</div></div>}
-                {activeStep.next_goal && <div><span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#475569' }}>Next goal</span><div style={{ fontSize: 'var(--fs-body)', color: '#94a3b8', marginTop: 3, lineHeight: 1.6 }}>{activeStep.next_goal}</div></div>}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
 
 // ─── Main dashboard ───────────────────────────────────────────────────────────
 
@@ -406,6 +225,9 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const { tasks: contextTasks, agents, sessions: allSessions, journeys: allJourneys, testerLink, siteUrl } = useProjectContext()
 
+  const { runState, currentTaskIdx, totalTasks, runningTaskTitle, statusMsg, progress, runningSiteId } = useAgentRun()
+  const agentIsRunning = runState === 'running' && runningSiteId === siteId
+
   const projects: Project[] = JSON.parse(localStorage.getItem(PROJECTS_STORAGE_KEY) ?? '[]')
   const project = projects.find(p => p.siteId === siteId)
   const hostname = (() => { try { return new URL(project?.url ?? '').hostname } catch { return project?.url ?? '' } })()
@@ -413,20 +235,53 @@ export default function DashboardPage() {
 
   const _versions = getVersions(siteId!, testerLink)
 
-  const [selectedPageIdx] = useState(0)
-  const [activeAnnotation, setActiveAnnotation] = useState<number | null>(null)
+  // Per-action-point screenshot from ActionPointsList (compact mode)
+  const [actionScreenshot, setActionScreenshot] = useState<import('../lib/api').ScreenshotMeta | null>(null)
+  const [actionAnnotation, setActionAnnotation] = useState<import('../lib/api').AnnotateResult | null>(null)
+  const [actionPending, setActionPending] = useState(false)
+  const [overviewHoveredDot, setOverviewHoveredDot] = useState<number | null>(null)
+
+  useEffect(() => {
+    const ann = actionAnnotation
+    console.log(
+      `[CC:dash] annotation state changed | sc: ${actionScreenshot?.id ?? 'null'} | pending: ${actionPending} | ann: ${
+        ann
+          ? `found=${ann.found} pts=${ann.points.length}` + (ann.points[0] ? ` first=(${ann.points[0].x.toFixed(0)},${ann.points[0].y.toFixed(0)}) "${ann.points[0].label.slice(0, 40)}"` : '')
+          : 'null'
+      }`
+    )
+  }, [actionScreenshot, actionAnnotation, actionPending])
+
+  const [compareContext, setCompareContext] = useState<{
+    highlight?: CompareHighlight
+    note?: string
+    explanation?: string
+  } | null>(null)
 
   const [agentFilter, setAgentFilter] = useState<Set<string> | null>(null)
   const [sessionFilter, setSessionFilter] = useState<Set<string> | null>(null)
   const [sankeyDivergences, setSankeyDivergences] = useState<NodeDivergence[]>([])
 
+
   const [searchParams, setSearchParams] = useSearchParams()
   const urlView = searchParams.get('view') ?? 'overview'
-  const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'details', 'human_vs_ai', 'time_event', 'flow_sankey'] as ActiveView[]).includes(urlView as ActiveView)
+  const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'human_vs_ai', 'time_event', 'flow_sankey'] as ActiveView[]).includes(urlView as ActiveView)
     ? (urlView as ActiveView)
     : 'overview'
- 
- 
+
+
+
+  const DIAGRAM_VIEW_MAP: Partial<Record<string, ActiveView>> = {
+    compare: 'human_vs_ai',
+    sankey: 'flow_sankey',
+    heatmap: 'heatmap',
+    multiflow: 'aggregate',
+    human_agg: 'aggregate',
+    similarity: 'aggregate',
+    comparative: 'overview',
+    insights: 'aggregate',
+    policy: 'aggregate',
+  }
 
   function setActiveView(view: ActiveView) {
     setSearchParams((prev: URLSearchParams) => {
@@ -436,8 +291,17 @@ export default function DashboardPage() {
     }, { replace: true })
   }
 
+  function handleNavigateTo(_tab: string, view?: string, note?: string, diagramRef?: DiagramRef) {
+    const target = (view ? DIAGRAM_VIEW_MAP[view] : undefined) ?? 'aggregate'
+    setActiveView(target)
+    if (target === 'human_vs_ai' && diagramRef) {
+      setCompareContext({ highlight: diagramRef.highlight, note, explanation: diagramRef.diagram_explanation })
+    } else {
+      setCompareContext(null)
+    }
+  }
+
   const [aggregateTaskId, setAggregateTaskId] = useState<number | null>(null)
-  const [showHeatmap, setShowHeatmap] = useState(true)
   const [overviewSplitPct, setOverviewSplitPct] = useState(80)
   const overviewContainerRef = useRef<HTMLDivElement>(null)
 
@@ -459,6 +323,7 @@ export default function DashboardPage() {
   const [compareAnalysis, setCompareAnalysis] = useState<api.ComparativeAnalysis | null>(null)
   const [compareLoading, setCompareLoading] = useState(false)
   const [compareError, setCompareError] = useState<string | null>(null)
+  const [analysisRunId, setAnalysisRunId] = useState(0)
   const [reEvalOpen, setReEvalOpen] = useState(false)
 
   const versions = _versions
@@ -493,33 +358,47 @@ export default function DashboardPage() {
     ? activeVersionEntry.tasks
     : contextTasks
 
-  const totalJourneyCount = journeys.length
+  const agentJourneyCount = journeys.filter(j => j.is_agent !== false).length
+  const humanJourneyCount = journeys.filter(j => j.is_agent === false).length
+
+  // Track latest counts via refs so the async handler always stores the current value,
+  // not the stale closure from the render that kicked off the analysis.
+  const agentJourneyCountRef = useRef(agentJourneyCount)
+  const humanJourneyCountRef = useRef(humanJourneyCount)
+  agentJourneyCountRef.current = agentJourneyCount
+  humanJourneyCountRef.current = humanJourneyCount
 
   useEffect(() => {
     setCompareError(null)
-    try {
-      const raw = localStorage.getItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId))
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        // Invalidate cache if journey count changed since it was saved
-        if (parsed._journeyCount !== undefined && totalJourneyCount > 0 && parsed._journeyCount !== totalJourneyCount) {
-          localStorage.removeItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId))
-          autoRunVersionRef.current = null
-        } else {
-          const { _journeyCount: _, ...analysis } = parsed
-          setCompareAnalysis(analysis as api.ComparativeAnalysis)
-          return
-        }
-      }
-    } catch { /* ignore */ }
+    // DEBUG: cache disabled — always re-run
+    // try {
+    //   const raw = localStorage.getItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId))
+    //   if (raw) {
+    //     const parsed = JSON.parse(raw)
+    //     const cachedAgent: number = parsed._agentCount ?? parsed._journeyCount ?? 0
+    //     const cachedUser: number = parsed._userCount ?? 0
+    //     const hasNew = (agentJourneyCount > 0 || humanJourneyCount > 0) &&
+    //       (agentJourneyCount > cachedAgent || humanJourneyCount > cachedUser)
+    //     if (hasNew) {
+    //       localStorage.removeItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId))
+    //       autoRunVersionRef.current = activeVersionId
+    //       setCompareAnalysis(null)
+    //       handleRunComparative()
+    //       return
+    //     }
+    //     const { _agentCount: _a, _userCount: _u, _journeyCount: _j, ...analysis } = parsed
+    //     setCompareAnalysis(analysis as api.ComparativeAnalysis)
+    //     return
+    //   }
+    // } catch { /* ignore */ }
     setCompareAnalysis(null)
     api.getStoredAnalysis(siteId!, activeVersionId)
       .then(result => {
-        localStorage.setItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId), JSON.stringify({ _journeyCount: totalJourneyCount, ...result }))
+        localStorage.setItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId), JSON.stringify({ _agentCount: agentJourneyCountRef.current, _userCount: humanJourneyCountRef.current, ...result }))
         setCompareAnalysis(result)
       })
       .catch(() => {})
-  }, [activeVersionId, siteId, totalJourneyCount])
+  }, [activeVersionId, siteId, agentJourneyCount, humanJourneyCount])
 
   async function handleReEvaluate(changes: string) {
     const projs: Project[] = JSON.parse(localStorage.getItem(PROJECTS_STORAGE_KEY) ?? '[]')
@@ -536,6 +415,7 @@ export default function DashboardPage() {
     }
     const updated = [...versions, newEntry]
     localStorage.setItem(VERSIONS_KEY(siteId!), JSON.stringify(updated))
+    localStorage.setItem(VERSION_STORAGE_KEY, newVersionId)
     localStorage.removeItem(ANALYSIS_STORAGE_KEY(siteId!, newVersionId))
     localStorage.removeItem(`ciphercorgi_agent_run_${siteId}`)
     setReEvalOpen(false)
@@ -626,18 +506,15 @@ useEffect(() => {
     })
     return out
   }, [sessionFilter, sessions, humanJourneysBySession])
-  
+
   const humanJourneySteps = useMemo<AgentStep[][]>(
     () => humanJourneyMeta.map(j => j.steps),
     [humanJourneyMeta],
   )
-  const humanLabels = useMemo(() => humanJourneyMeta.map(j => j.label), [humanJourneyMeta])
- 
 
-  const aggregatedScreenshots = useMemo(
-    () => getAggregatedScreenshots(agentJourneySteps, humanJourneySteps),
-    [agentJourneySteps, humanJourneySteps],
-  )
+  const humanLabels = useMemo(() => humanJourneyMeta.map(j => j.label), [humanJourneyMeta])
+
+
 
   const allAgentSteps = useMemo<AgentStep[]>(
     () => agentJourneys.flatMap(j => j.steps as AgentStep[]),
@@ -658,14 +535,16 @@ useEffect(() => {
 
   const autoRunVersionRef = useRef<string | null>(null)
   useEffect(() => {
-    if (autoRunVersionRef.current === activeVersionId) return
+    // DEBUG: cache disabled — always re-run
+    // if (autoRunVersionRef.current === activeVersionId) return
     if (compareLoading || compareAnalysis) return
-    const cached = localStorage.getItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId))
-    if (cached) return
+    if (agentJourneyCount === 0 && humanJourneyCount === 0) return
+    // const cached = localStorage.getItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId))
+    // if (cached) return
     autoRunVersionRef.current = activeVersionId
     handleRunComparative()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeVersionId, compareLoading, compareAnalysis])
+  }, [activeVersionId, compareLoading, compareAnalysis, agentJourneyCount, humanJourneyCount])
 
   async function handleRunComparative() {
     if (compareLoading) return
@@ -673,8 +552,9 @@ useEffect(() => {
     setCompareError(null)
     try {
       const result = await api.runComparativeAnalysis(siteId!, undefined, activeVersionId)
+      setAnalysisRunId(id => id + 1)
       setCompareAnalysis(result)
-      localStorage.setItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId), JSON.stringify({ _journeyCount: totalJourneyCount, ...result }))
+      localStorage.setItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId), JSON.stringify({ _agentCount: agentJourneyCountRef.current, _userCount: humanJourneyCountRef.current, ...result }))
     } catch (err) {
       setCompareError(err instanceof Error ? err.message : 'Analysis failed')
     } finally {
@@ -733,11 +613,10 @@ useEffect(() => {
                     overview: 'Action Points',
                     aggregate: 'Aggregate Journeys',
                     heatmap: 'Heatmap',
-                    details: 'Journey Flow',
                     human_vs_ai: 'Human vs AI',
                     time_event: 'Time-Event-Overview',
                     flow_sankey: 'Flow Diagram',
-                  }[activeView]}            
+                  }[activeView]}
               </span>
           </div>
 
@@ -767,7 +646,6 @@ useEffect(() => {
               onSelectAllAgents={() => setAgentFilter((prev: Set<string> | null) => prev === null ? new Set<string>() : null)}
               onToggleSession={toggleSession}
               onSelectAllSessions={() => setSessionFilter((prev: Set<string> | null) => prev === null ? new Set<string>() : null)}
-              showHeatmap={showHeatmap} onToggleHeatmap={() => setShowHeatmap((v: boolean) => !v)}
             />
             <select
               className="version-select version-select-sm"
@@ -790,23 +668,106 @@ useEffect(() => {
         {activeView === 'overview' && (
           <div ref={overviewContainerRef} style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
             <div style={{ flex: `0 0 ${overviewSplitPct}%`, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-              <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {aggregatedScreenshots.length > 0 ? (() => {
-                  const shot = aggregatedScreenshots[selectedPageIdx] ?? aggregatedScreenshots[0]
-                  return (
-                    <ScreenshotCarousel
-                      screenshots={[shot]}
-                      activeAnnotation={activeAnnotation}
-                      onAnnotationClick={(idx: number) => setActiveAnnotation((prev: number | null) => prev === idx ? null : idx)}
-                      activePageIndex={0}
-                      onPageChange={() => {}}
-                      showHeatmap={false}
-                    />
-                  )
-                })() : (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10, color: 'var(--gray400)', fontSize: 'var(--fs-body)' }}>
+              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '12px 16px', display: 'flex', flexDirection: 'column' }}>
+                {actionScreenshot ? (
+                  <div className="sc-stage" style={{ display: 'flex', flexDirection: 'column', maxHeight: '100%', overflow: 'hidden' }}>
+                    <div className="sc-chrome">
+                      <div className="sc-chrome-dots"><span /><span /><span /></div>
+                      <div className="sc-chrome-bar">{actionScreenshot.path ?? ''}</div>
+                    </div>
+                    <div className="sc-viewport" style={{ overflow: 'hidden', position: 'relative' }}>
+                      <img src={api.screenshotImageUrl(actionScreenshot.id)} className="sc-real-screenshot" alt="" />
+                      {actionAnnotation?.found && actionAnnotation.points.map((pt, i) => {
+                        const colors = ['#C73E1D', '#185FA5', '#d97706', '#378ADD']
+                        const color = colors[i % colors.length]
+                        const above = pt.y > 50
+                        return (
+                          <div
+                            key={i}
+                            className="sc-ann-group"
+                            style={{ left: `${pt.x}%`, top: `${pt.y}%` }}
+                            onMouseEnter={() => setOverviewHoveredDot(i)}
+                            onMouseLeave={() => setOverviewHoveredDot(null)}
+                          >
+                            <div className="sc-ann-dot" style={{ background: color, animationDelay: `${i * 0.12}s` }}>
+                              <div className="sc-ann-pulse" style={{ borderColor: color, animationDelay: `${i * 0.4}s` }} />
+                            </div>
+                            {overviewHoveredDot === i && (
+                              <div style={{
+                                position: 'absolute',
+                                [above ? 'bottom' : 'top']: '100%',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                marginBottom: above ? 6 : 0,
+                                marginTop: above ? 0 : 6,
+                                background: '#0f172a',
+                                color: '#e2e8f0',
+                                border: `1px solid ${color}`,
+                                borderRadius: 6,
+                                padding: '4px 8px',
+                                fontSize: 'var(--fs-small)',
+                                whiteSpace: 'normal' as const,
+                                maxWidth: 220,
+                                zIndex: 10,
+                                pointerEvents: 'none',
+                                lineHeight: 1.4,
+                              }}>
+                                {pt.label}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : actionPending ? (
+                  <div className="sc-stage" style={{ display: 'flex', flexDirection: 'column', maxHeight: '100%', overflow: 'hidden' }}>
+                    <div className="sc-chrome">
+                      <div className="sc-chrome-dots"><span /><span /><span /></div>
+                      <div className="sc-chrome-bar" style={{ color: 'var(--gray400)' }}>Selecting screenshot…</div>
+                    </div>
+                    <div className="sc-viewport" style={{ overflow: 'hidden', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 200 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: 'var(--gray400)' }}>
+                        <span style={{ width: 22, height: 22, borderRadius: '50%', border: '2.5px solid var(--gray200)', borderTopColor: 'var(--brand)', animation: 'spin 0.7s linear infinite', display: 'inline-block' }} />
+                        <span style={{ fontSize: 'var(--fs-small)' }}>Finding best screenshot…</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : agentIsRunning ? (
+                  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 24px' }}>
+                    <div style={{ width: '100%', maxWidth: 420, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+                      {/* Header row */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                        <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>
+                          Task {currentTaskIdx + 1} of {totalTasks}
+                        </span>
+                        <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--brand)' }}>{progress}%</span>
+                      </div>
+                      {/* Progress bar */}
+                      <div style={{ height: 6, background: 'var(--gray200)', borderRadius: 3, overflow: 'hidden', marginBottom: 12 }}>
+                        <div style={{ height: '100%', width: `${progress}%`, background: 'var(--brand)', borderRadius: 3, transition: 'width 0.4s ease' }} />
+                      </div>
+                      {/* Task title */}
+                      {runningTaskTitle && (
+                        <div style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+                          {runningTaskTitle}
+                        </div>
+                      )}
+                      {/* Live status */}
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, marginTop: 4, background: 'var(--brand)', animation: 'pulse-dot 1.4s ease-in-out infinite' }} />
+                        <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.5 }}>
+                          {statusMsg || 'Agent is running… (this may take a few minutes)'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: 'var(--gray400)', fontSize: 'var(--fs-body)' }}>
                     <span style={{ fontSize: 'var(--fs-headline)' }}>📸</span>
-                    No journeys recorded yet. Run an agent or record a human session to see screenshots.
+                    <span style={{ fontSize: 'var(--fs-small)' }}>
+                      {compareAnalysis ? 'No matching screenshot for this action point' : 'No journeys recorded yet. Run an agent or record a human session to see screenshots.'}
+                    </span>
                   </div>
                 )}
               </div>
@@ -826,14 +787,16 @@ useEffect(() => {
                 compareError={compareError}
                 onRunAnalysis={handleRunComparative}
                 onRerunAnalysis={handleRerunComparative}
+                analysisRunId={analysisRunId}
                 agentJourneyIds={agentJourneys.filter(j => j.id > 0).map(j => j.id)}
                 agentJourneys={agentJourneys as api.JourneyResponse[]}
                 humanJourneySteps={Array.from(humanStepsBySession.values())}
                 taskFilter={null}
                 tasks={tasks}
-                onNavigateTo={() => setActiveView('aggregate')}
+                onNavigateTo={handleNavigateTo}
                 ratingsSummary={ratingsSummary}
                 compact
+                onScreenshotChange={(sc, ann, pending) => { setActionScreenshot(sc); setActionAnnotation(ann); setActionPending(pending) }}
               />
             </div>
           </div>
@@ -877,6 +840,7 @@ useEffect(() => {
             </div>
           </div>
       )}
+
 
 
 
@@ -929,23 +893,12 @@ useEffect(() => {
             ) : (
               <HeatmapCarousel
                 agentJourneys={agentJourneys as api.JourneyResponse[]}
-                humanSessionSteps={humanStepsBySession}
+                humanJourneysBySession={humanJourneysBySession}
                 loading={humanLoading}
                 tasks={tasks}
               />
             )}
           </div>
-        )}
-
-        {/* ── TRAJECTORIES ── */}
-        {activeView === 'details' && (
-          <TrajectoryView
-            tasks={tasks}
-            agentJourneys={agentJourneys as api.JourneyResponse[]}
-            sessions={sessions}
-            humanStepsBySession={humanStepsBySession}
-            humanLoading={humanLoading}
-          />
         )}
 
         {/* ── HUMAN VS AI ── */}
@@ -963,6 +916,8 @@ useEffect(() => {
                 agentJourneys={agentJourneys as api.JourneyResponse[]}
                 humanSessionStepCounts={humanSessionStepCounts}
                 humanSessionCount={visibleSessionCount}
+                actionContext={compareContext}
+                onClearActionContext={() => setCompareContext(null)}
               />
             )}
           </div>
