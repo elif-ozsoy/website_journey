@@ -657,6 +657,7 @@ const DIAGRAM_LABELS: Record<string, string> = {
   insights: 'Insights',
   human_agg: 'Human Aggregate',
   policy: 'Policy Bot',
+  horizon: 'Horizon Graph',
 }
 
 function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJourneySteps, ratingsSummary, onDone, onSkip, onPrev, onNext, onNavigateTo, compact = false }: {

@@ -43,7 +43,7 @@ Analyse the journeys and respond ONLY with a JSON object (no markdown, no explan
           "agent_bullets": ["what the agent did differently from humans — ≤12 words, must ref step N or /url", "...", "..."],
           "human_bullets": ["what humans did naturally (target behaviour) — ≤12 words, must ref step N or /url", "...", "..."],
           "diagrams": [
-            {"view": "compare" | "sankey" | "heatmap" | "multiflow" | "similarity" | "comparative" | "insights" | "human_agg" | "policy", "reason": "one sentence: what specifically to look for in this diagram that evidences the issue"}
+            {"view": "compare" | "sankey" | "heatmap" | "multiflow" | "similarity" | "comparative" | "insights" | "human_agg" | "policy" | "horizon", "reason": "one sentence: what specifically to look for in this diagram that evidences the issue"}
           ]
         }
       ],
@@ -56,7 +56,7 @@ Analyse the journeys and respond ONLY with a JSON object (no markdown, no explan
           "agent_bullets": ["what the agent did differently from humans — ≤12 words, must ref step N or /url", "...", "..."],
           "human_bullets": ["what humans did naturally (target behaviour) — ≤12 words, must ref step N or /url", "...", "..."],
           "diagrams": [
-            {"view": "compare" | "sankey" | "heatmap", "reason": "one sentence: what this diagram shows that motivates this recommendation"}
+            {"view": "compare" | "sankey" | "heatmap" | "horizon", "reason": "one sentence: what this diagram shows that motivates this recommendation"}
           ]
         }
       ]
@@ -86,6 +86,7 @@ Guidelines:
   * "insights" — aggregated metrics: session counts, average steps, drop-off rates, time-on-page per step. Best for: quantifying drop-off at a specific page, confirming that a step takes disproportionately long, validating step-count claims with hard numbers.
   * "human_agg" — Sankey diagram of aggregated human navigation paths, sized by session count and coloured by frequency (green = common, red = rare). Best for: showing which paths real users actually take, identifying where users drop off or bounce, highlighting the dominant navigation flow vs. detours.
   * "policy" — AI agent re-run guided by the human-aggregate behavioural policy; shows how injecting real user context changes the agent's decisions. Best for: demonstrating whether the agent's deviations from human paths are correctable, validating that a navigation issue exists even with policy guidance.
+  * "horizon" — horizon graph showing action density over relative journey time for every agent and human session as colour-coded strips; darker = more intense activity. Best for: pinpointing where in a journey (early, mid, late) cognitive load spikes, identifying tasks where agents front-load actions while humans distribute them evenly, and surfacing pacing differences that suggest confusing or overwhelming UI sections.
 - The platform goal is agent calibration: helping UX designers replace human testers with AI agents. Your analysis must distinguish between (a) genuine website UX problems and (b) agent calibration gaps where the agent simply behaves differently from humans.
 - For `type` on each pain_point and recommendation: use "ux_issue" if both agent and human struggle, "agent_gap" if the agent deviates from human behaviour (calibration problem), "human_issue" if humans struggle but the agent does not.
 - For agent_bullets: describe what the agent did DIFFERENTLY from the human (the deviation). Exactly 3 strings, ≤12 words each. MUST include at least one of: "step N", "/url-path", or UI element name in quotes. Do NOT write "The agent..." — state the observation directly.

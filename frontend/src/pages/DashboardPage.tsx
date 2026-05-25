@@ -49,6 +49,7 @@ import AggregateFlowView from '../components/dashboard/AggregateFlowView'
 import ActionPointsList from '../components/dashboard/ActionPointsList'
 import HeatmapCarousel from '../components/dashboard/HeatmapCarousel'
 import ComparePanel from '../components/dashboard/ComparePanel'
+import HorizonGraph from '../components/dashboard/HorizonGraph'
 import {
   getStepsFromSessionEvents,
   getTaskJourneysFromSessionEvents,
@@ -64,7 +65,7 @@ import type { AgentStep } from '../components/agent/agentTypes'
 
 interface SelectOption { id: string; name: string; meta?: string }
 
-type ActiveView = 'overview' | 'aggregate' | 'heatmap' | 'details' | 'human_vs_ai' | 'time_event' | 'flow_sankey'
+type ActiveView = 'overview' | 'aggregate' | 'heatmap' | 'details' | 'human_vs_ai' | 'time_event' | 'flow_sankey' | 'horizon_graph'
 // ─── Nav item icons ───────────────────────────────────────────────────────────
 
 // ─── Filter pills ─────────────────────────────────────────────────────────────
@@ -420,7 +421,7 @@ export default function DashboardPage() {
 
   const [searchParams, setSearchParams] = useSearchParams()
   const urlView = searchParams.get('view') ?? 'overview'
-  const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'details', 'human_vs_ai', 'time_event', 'flow_sankey'] as ActiveView[]).includes(urlView as ActiveView)
+  const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'details', 'human_vs_ai', 'time_event', 'flow_sankey', 'horizon_graph'] as ActiveView[]).includes(urlView as ActiveView)
     ? (urlView as ActiveView)
     : 'overview'
  
@@ -678,6 +679,24 @@ useEffect(() => {
     handleRunComparative()
   }
 
+  const DIAGRAM_VIEW_MAP: Record<string, ActiveView> = {
+    compare: 'human_vs_ai',
+    sankey: 'flow_sankey',
+    heatmap: 'heatmap',
+    multiflow: 'aggregate',
+    similarity: 'human_vs_ai',
+    comparative: 'overview',
+    insights: 'human_vs_ai',
+    human_agg: 'aggregate',
+    policy: 'overview',
+    horizon: 'horizon_graph',
+  }
+
+  function handleNavigateTo(_tab: string, view?: string) {
+    const target = view ? (DIAGRAM_VIEW_MAP[view] ?? 'aggregate') : 'aggregate'
+    setActiveView(target)
+  }
+
   function toggleAgent(id: string) {
     setAgentFilter(prev => {
       const allIds = agents.map(a => a.id)
@@ -727,6 +746,7 @@ useEffect(() => {
                     human_vs_ai: 'Human vs AI',
                     time_event: 'Time-Event-Overview',
                     flow_sankey: 'Flow Diagram',
+                    horizon_graph: 'Horizon Graph',
                   }[activeView]}            
               </span>
           </div>
@@ -821,7 +841,7 @@ useEffect(() => {
                 humanJourneySteps={Array.from(humanStepsBySession.values())}
                 taskFilter={null}
                 tasks={tasks}
-                onNavigateTo={() => setActiveView('aggregate')}
+                onNavigateTo={handleNavigateTo}
                 ratingsSummary={ratingsSummary}
                 compact
               />
@@ -856,6 +876,46 @@ useEffect(() => {
       )}
 
 
+
+        {/* ── HORIZON GRAPH ── */}
+        {activeView === 'horizon_graph' && (
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
+            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)' }}>
+              {agentJourneys.length === 0 && humanJourneySteps.length === 0 ? (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, background: 'var(--bg)' }}>
+                  <div style={{ fontSize: 'var(--fs-headline)' }}>📈</div>
+                  <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>No activity data yet</div>
+                  <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', maxWidth: 340, textAlign: 'center', lineHeight: 1.6 }}>Run an agent or record a human session to see the horizon graph.</div>
+                </div>
+              ) : (
+                <HorizonGraph
+                  agentJourneys={agentJourneySteps}
+                  humanJourneys={humanJourneySteps}
+                  agentLabels={agentJourneys.map((_, i) => `AI Run #${i + 1}`)}
+                  humanLabels={humanJourneyMeta.map(j => j.label)}
+                />
+              )}
+            </div>
+            <div style={{ width: 360, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <ActionPointsList
+                siteId={siteId!}
+                compareAnalysis={compareAnalysis}
+                compareLoading={compareLoading}
+                compareError={compareError}
+                onRunAnalysis={handleRunComparative}
+                onRerunAnalysis={handleRerunComparative}
+                agentJourneyIds={agentJourneys.filter(j => j.id > 0).map(j => j.id)}
+                agentJourneys={agentJourneys as api.JourneyResponse[]}
+                humanJourneySteps={Array.from(humanStepsBySession.values())}
+                taskFilter={null}
+                tasks={tasks}
+                onNavigateTo={handleNavigateTo}
+                ratingsSummary={ratingsSummary}
+                compact
+              />
+            </div>
+          </div>
+        )}
 
         {/* ── AGGREGATE JOURNEYS (SANKEY) ── */}
         {activeView === 'aggregate' && (

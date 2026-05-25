@@ -129,6 +129,15 @@ function IcoFlow() {
   </svg>
 }
 
+function IcoHorizon() {
+  return <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="1" y="3" width="14" height="4" rx="1" fill="currentColor" fillOpacity="0.15"/>
+    <path d="M1 5 Q4 3.5 8 5 Q12 6.5 15 5" strokeOpacity="0.9"/>
+    <rect x="1" y="9" width="14" height="4" rx="1" fill="currentColor" fillOpacity="0.15"/>
+    <path d="M1 11 Q4 9 8 11 Q12 13 15 11" strokeOpacity="0.9"/>
+  </svg>
+}
+
 // ─── Nav item ─────────────────────────────────────────────────────────────────
 
 function NavItem({
@@ -224,7 +233,7 @@ export default function AppSidebar() {
     { view: 'human_vs_ai', label: 'Human vs AI', icon: <IcoHumanVsAI /> },
     { view: 'time_event', label: 'Time-Event-Overview', icon: <IcoTimeline /> },
     { view: 'flow_sankey', label: 'Flow Diagram', icon: <IcoFlow /> },
-
+    { view: 'horizon_graph', label: 'Horizon Graph', icon: <IcoHorizon /> },
   ]
 
   return (
