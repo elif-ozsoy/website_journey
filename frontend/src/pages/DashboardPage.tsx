@@ -257,7 +257,11 @@ export default function DashboardPage() {
     highlight?: CompareHighlight
     note?: string
     explanation?: string
+    targetView: ActiveView
   } | null>(null)
+
+  // Only expose context when the user is on the view it was set for
+  const activeCompareContext = compareContext?.targetView === activeView ? compareContext : null
 
   const [agentFilter, setAgentFilter] = useState<Set<string> | null>(null)
   const [sessionFilter, setSessionFilter] = useState<Set<string> | null>(null)
@@ -297,7 +301,7 @@ export default function DashboardPage() {
     setActiveView(target)
     const HIGHLIGHT_VIEWS: ActiveView[] = ['human_vs_ai', 'flow_sankey', 'horizon_graph']
     if (HIGHLIGHT_VIEWS.includes(target) && diagramRef) {
-      setCompareContext({ highlight: diagramRef.highlight, note, explanation: diagramRef.diagram_explanation })
+      setCompareContext({ highlight: diagramRef.highlight, note, explanation: diagramRef.diagram_explanation, targetView: target })
     } else {
       setCompareContext(null)
     }
@@ -838,7 +842,7 @@ useEffect(() => {
                   agentLabels={agentLabels}
                   humanLabels={humanLabels}
                   onDivergencesChange={setSankeyDivergences}
-                  highlight={compareContext?.highlight}
+                  highlight={activeCompareContext?.highlight}
                 />
               )}
             </div>
@@ -850,7 +854,7 @@ useEffect(() => {
                 agentJourneys={agentJourneys as api.JourneyResponse[]}
                 humanJourneySteps={humanJourneySteps}
                 divergences={sankeyDivergences}
-                actionContext={compareContext}
+                actionContext={activeCompareContext}
                 onClearActionContext={() => setCompareContext(null)}
               />
             </div>
@@ -942,7 +946,7 @@ useEffect(() => {
                 agentJourneys={agentJourneys as api.JourneyResponse[]}
                 humanSessionStepCounts={humanSessionStepCounts}
                 humanSessionCount={visibleSessionCount}
-                actionContext={compareContext}
+                actionContext={activeCompareContext}
                 onClearActionContext={() => setCompareContext(null)}
               />
             )}
@@ -979,7 +983,7 @@ useEffect(() => {
                   humanJourneys={humanJourneySteps}
                   agentLabels={agentLabels}
                   humanLabels={humanLabels}
-                  highlight={compareContext?.highlight}
+                  highlight={activeCompareContext?.highlight}
                 />
               )}
             </div>
@@ -990,7 +994,7 @@ useEffect(() => {
                 compareLoading={compareLoading}
                 agentJourneys={agentJourneys as api.JourneyResponse[]}
                 humanJourneySteps={humanJourneySteps}
-                actionContext={compareContext}
+                actionContext={activeCompareContext}
                 onClearActionContext={() => setCompareContext(null)}
               />
             </div>
