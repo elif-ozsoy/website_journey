@@ -1154,7 +1154,23 @@ export default function SankeyDiagram({
         }
         return parts.join(' · ')
       })
-  }, [graph, journeyMap, journeys.length, hasData, nodeColor, divergentNodeIds, resizeTick])
+
+    /* Apply highlight-based dimming as part of the initial render so that
+     * resizes (which re-run this effect) always restore the correct state.
+     * The hover effect below temporarily overrides this during mouse interaction. */
+    const focusKindInit = highlight?.side === 'ai' ? 'agent' : highlight?.side === 'human' ? 'human' : null
+    if (focusKindInit) {
+      g.selectAll('path').attr('opacity', function (d: any) {
+        const meta = journeyMap.get((d as LinkDatum).journeyId)
+        return meta?.kind === focusKindInit ? NORMAL_OPACITY : DIM_OPACITY
+      })
+      g.selectAll('rect').attr('opacity', function (d: any) {
+        const node = d as NodeDatum
+        const hasKind = node.visits?.some(v => journeyMap.get(v.journeyId)?.kind === focusKindInit)
+        return hasKind ? 1 : DIM_OPACITY
+      })
+    }
+  }, [graph, journeyMap, journeys.length, hasData, nodeColor, divergentNodeIds, resizeTick, highlight])
 
   /* ── Hover / highlight: dim non-relevant journeys ───────────────────────── */
 
