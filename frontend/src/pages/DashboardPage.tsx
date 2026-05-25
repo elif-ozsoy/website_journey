@@ -50,6 +50,7 @@ import ActionPointsList from '../components/dashboard/ActionPointsList'
 import HeatmapCarousel from '../components/dashboard/HeatmapCarousel'
 import ComparePanel from '../components/dashboard/ComparePanel'
 import HorizonGraph from '../components/dashboard/HorizonGraph'
+import HorizonInsightsPanel from '../components/dashboard/HorizonInsightsPanel'
 import {
   getStepsFromSessionEvents,
   getTaskJourneysFromSessionEvents,
@@ -448,6 +449,23 @@ export default function DashboardPage() {
       const rect = container.getBoundingClientRect()
       const pct = Math.min(80, Math.max(20, ((mv.clientX - rect.left) / rect.width) * 100))
       setOverviewSplitPct(pct)
+    }
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  const [horizonSplitPct, setHorizonSplitPct] = useState(68)
+  const horizonContainerRef = useRef<HTMLDivElement>(null)
+
+  function startHorizonDrag(e: React.MouseEvent) {
+    e.preventDefault()
+    const container = horizonContainerRef.current
+    if (!container) return
+    const onMove = (mv: MouseEvent) => {
+      const rect = container.getBoundingClientRect()
+      const pct = Math.min(80, Math.max(30, ((mv.clientX - rect.left) / rect.width) * 100))
+      setHorizonSplitPct(pct)
     }
     const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
     window.addEventListener('mousemove', onMove)
@@ -879,8 +897,9 @@ useEffect(() => {
 
         {/* ── HORIZON GRAPH ── */}
         {activeView === 'horizon_graph' && (
-          <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
-            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)' }}>
+          <div ref={horizonContainerRef} style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
+            {/* Left: horizon graph */}
+            <div style={{ flex: `0 0 ${horizonSplitPct}%`, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               {agentJourneys.length === 0 && humanJourneySteps.length === 0 ? (
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, background: 'var(--bg)' }}>
                   <div style={{ fontSize: 'var(--fs-headline)' }}>📈</div>
@@ -896,22 +915,20 @@ useEffect(() => {
                 />
               )}
             </div>
-            <div style={{ width: 360, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <ActionPointsList
-                siteId={siteId!}
+            {/* Draggable divider */}
+            <div
+              onMouseDown={startHorizonDrag}
+              style={{ width: 5, flexShrink: 0, cursor: 'col-resize', background: 'var(--border)', transition: 'background 0.15s' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'var(--border)')}
+            />
+            {/* Right: insights panel */}
+            <div style={{ flex: 1, minWidth: 0, borderLeft: 'none', overflow: 'hidden', background: 'var(--surface)' }}>
+              <HorizonInsightsPanel
                 compareAnalysis={compareAnalysis}
                 compareLoading={compareLoading}
-                compareError={compareError}
-                onRunAnalysis={handleRunComparative}
-                onRerunAnalysis={handleRerunComparative}
-                agentJourneyIds={agentJourneys.filter(j => j.id > 0).map(j => j.id)}
                 agentJourneys={agentJourneys as api.JourneyResponse[]}
-                humanJourneySteps={Array.from(humanStepsBySession.values())}
-                taskFilter={null}
-                tasks={tasks}
-                onNavigateTo={handleNavigateTo}
-                ratingsSummary={ratingsSummary}
-                compact
+                humanJourneySteps={humanJourneySteps}
               />
             </div>
           </div>
