@@ -298,13 +298,16 @@ export default function DashboardPage() {
 
   function handleNavigateTo(_tab: string, view?: string, note?: string, diagramRef?: DiagramRef) {
     const target = (view ? DIAGRAM_VIEW_MAP[view] : undefined) ?? 'aggregate'
-    setActiveView(target)
     const HIGHLIGHT_VIEWS: ActiveView[] = ['human_vs_ai', 'flow_sankey', 'horizon_graph']
+    // Set context BEFORE changing view so that if setSearchParams triggers a
+    // render before setCompareContext is batched, the context is already ready
+    // when the diagram view mounts.
     if (HIGHLIGHT_VIEWS.includes(target) && diagramRef) {
       setCompareContext({ highlight: diagramRef.highlight, note, explanation: diagramRef.diagram_explanation, targetView: target })
     } else {
       setCompareContext(null)
     }
+    setActiveView(target)
   }
 
   const [aggregateTaskId, setAggregateTaskId] = useState<number | null>(null)

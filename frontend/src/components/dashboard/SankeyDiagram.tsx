@@ -1206,7 +1206,7 @@ export default function SankeyDiagram({
 
     svg.selectAll('path').attr('opacity', NORMAL_OPACITY)
     svg.selectAll('rect').attr('opacity', 1)
-  }, [hoverJourneyId, highlight, journeyMap])
+  }, [hoverJourneyId, highlight, journeyMap, hasData])
 
   const onLegendClick = useCallback((id: string) => {
     setHiddenJourneyIds(prev => {
