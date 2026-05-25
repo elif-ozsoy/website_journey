@@ -1,12 +1,14 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import * as d3 from 'd3'
 import type { AgentStep } from '../agent/agentTypes'
+import type { CompareHighlight } from '../../lib/api'
 
 interface Props {
   agentJourneys: AgentStep[][]
   humanJourneys?: AgentStep[][]
   agentLabels?: string[]
   humanLabels?: string[]
+  highlight?: CompareHighlight
 }
 
 const AGENT_COLOR = '#32494B'
@@ -325,7 +327,7 @@ function OverlayDensityChart({
  * ────────────────────────────────────────────────────────────────────────── */
 
 export default function HorizonGraph({
-  agentJourneys, humanJourneys = [], agentLabels, humanLabels,
+  agentJourneys, humanJourneys = [], agentLabels, humanLabels, highlight,
 }: Props) {
   type KindFilter = 'both' | 'agent' | 'human'
   const [kindFilter, setKindFilter] = useState<KindFilter>('both')
@@ -393,6 +395,9 @@ export default function HorizonGraph({
   const stripW = Math.max(160, containerW - STRIP_LABEL_W - 32)
   const hasData = journeys.length > 0
 
+  const focusKind: 'agent' | 'human' | null =
+    highlight?.side === 'ai' ? 'agent' : highlight?.side === 'human' ? 'human' : null
+
   return (
     <div ref={containerRef} style={{
       padding: '16px 20px', display: 'flex', flexDirection: 'column',
@@ -406,8 +411,20 @@ export default function HorizonGraph({
         flexShrink: 0, flexWrap: 'wrap', gap: 8, marginBottom: 12,
       }}>
         <div>
-          <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>
-            Activity density over journey time
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>
+              Activity density over journey time
+            </div>
+            {focusKind && (
+              <span style={{
+                fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+                background: focusKind === 'agent' ? `${AGENT_COLOR}18` : `${HUMAN_COLOR}18`,
+                color: focusKind === 'agent' ? AGENT_COLOR : HUMAN_COLOR,
+                border: `1px solid ${focusKind === 'agent' ? AGENT_COLOR : HUMAN_COLOR}`,
+              }}>
+                {focusKind === 'agent' ? 'AI journeys highlighted' : 'Human journeys highlighted'}
+              </span>
+            )}
           </div>
           <div style={{ fontSize: '0.7rem', color: TEXT_MUTED, marginTop: 2 }}>
             Average action density across all journeys · click a strip below to inspect steps
@@ -477,19 +494,24 @@ export default function HorizonGraph({
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: STRIP_GAP }}>
-            {visibleJourneys.map(j => (
-              <JourneyStrip
-                key={j.id}
-                journey={j}
-                bandSize={bandSize}
-                stripW={stripW}
-                isHovered={hoverJourneyId === j.id}
-                isDimmed={hoverJourneyId !== null && hoverJourneyId !== j.id}
-                onHover={() => setHoverJourneyId(j.id)}
-                onLeave={() => setHoverJourneyId(null)}
-                onClickAt={relT => setSelection({ journeyId: j.id, relT })}
-              />
-            ))}
+            {visibleJourneys.map(j => {
+              const isHighlighted = focusKind ? j.kind === focusKind : false
+              const isDimmedByHighlight = focusKind ? j.kind !== focusKind : false
+              return (
+                <JourneyStrip
+                  key={j.id}
+                  journey={j}
+                  bandSize={bandSize}
+                  stripW={stripW}
+                  isHovered={hoverJourneyId === j.id}
+                  isDimmed={hoverJourneyId !== null ? hoverJourneyId !== j.id : isDimmedByHighlight}
+                  isHighlighted={isHighlighted && !hoverJourneyId}
+                  onHover={() => setHoverJourneyId(j.id)}
+                  onLeave={() => setHoverJourneyId(null)}
+                  onClickAt={relT => setSelection({ journeyId: j.id, relT })}
+                />
+              )
+            })}
           </div>
         )}
       </div>
@@ -518,10 +540,10 @@ export default function HorizonGraph({
  * ────────────────────────────────────────────────────────────────────────── */
 
 function JourneyStrip({
-  journey, bandSize, stripW, isHovered, isDimmed, onHover, onLeave, onClickAt,
+  journey, bandSize, stripW, isHovered, isDimmed, isHighlighted, onHover, onLeave, onClickAt,
 }: {
   journey: Journey; bandSize: number; stripW: number
-  isHovered: boolean; isDimmed: boolean
+  isHovered: boolean; isDimmed: boolean; isHighlighted?: boolean
   onHover: () => void; onLeave: () => void; onClickAt: (relT: number) => void
 }) {
   const totalActions = journey.samples.length
@@ -548,15 +570,17 @@ function JourneyStrip({
 
   return (
     <div onMouseEnter={onHover} onMouseLeave={onLeave}
-      style={{ display: 'flex', alignItems: 'stretch', gap: 8, opacity: isDimmed ? 0.35 : 1, transition: 'opacity 0.15s' }}>
+      style={{ display: 'flex', alignItems: 'stretch', gap: 8, opacity: isDimmed ? 0.25 : 1, transition: 'opacity 0.15s' }}>
       <div style={{
         width: STRIP_LABEL_W, flexShrink: 0,
         display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 8px',
-        borderLeft: `3px solid ${journey.color}`,
-        background: isHovered ? `${journey.color}12` : 'transparent',
+        borderLeft: `${isHighlighted ? 5 : 3}px solid ${journey.color}`,
+        background: isHighlighted ? `${journey.color}20` : isHovered ? `${journey.color}12` : 'transparent',
         transition: 'background 0.15s',
+        outline: isHighlighted ? `1.5px solid ${journey.color}40` : 'none',
+        borderRadius: isHighlighted ? '0 4px 4px 0' : 0,
       }}>
-        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: journey.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: isHighlighted ? 800 : 700, color: journey.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {journey.label}
         </div>
         <div style={{ fontSize: '0.63rem', color: TEXT_MUTED, marginTop: 1 }}>

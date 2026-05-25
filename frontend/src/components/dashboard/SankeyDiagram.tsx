@@ -3,6 +3,7 @@ import * as d3 from 'd3'
 import { createPortal } from 'react-dom'
 import { sankey as d3Sankey, sankeyLinkHorizontal } from 'd3-sankey'
 import type { AgentStep } from '../agent/agentTypes'
+import type { CompareHighlight } from '../../lib/api'
 
 /* ────────────────────────────────────────────────────────────────────────────
  *  Props
@@ -14,6 +15,7 @@ interface Props {
   agentLabels?: string[]
   humanLabels?: string[]
   onDivergencesChange?: (divergences: NodeDivergence[]) => void
+  highlight?: CompareHighlight
 }
 
 /* ── Color tokens ──
@@ -824,6 +826,7 @@ export default function SankeyDiagram({
   agentLabels,
   humanLabels,
   onDivergencesChange,
+  highlight,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -1153,24 +1156,41 @@ export default function SankeyDiagram({
       })
   }, [graph, journeyMap, journeys.length, hasData, nodeColor, divergentNodeIds, resizeTick])
 
-  /* ── Hover-highlight: dim everything except the hovered journey ─────────── */
+  /* ── Hover / highlight: dim non-relevant journeys ───────────────────────── */
 
   useEffect(() => {
     const svg = d3.select(svgRef.current!)
-    if (!hoverJourneyId) {
-      svg.selectAll('path').attr('opacity', NORMAL_OPACITY)
-      svg.selectAll('rect').attr('opacity', 1)
+
+    if (hoverJourneyId) {
+      svg.selectAll<SVGPathElement, LinkDatum>('path').attr('opacity', function (d: any) {
+        return (d as LinkDatum).journeyId === hoverJourneyId ? HIGHLIGHT_OPACITY : DIM_OPACITY
+      })
+      svg.selectAll<SVGRectElement, NodeDatum>('rect').attr('opacity', function (d: any) {
+        const node = d as NodeDatum
+        const match = node.visits?.some(v => v.journeyId === hoverJourneyId)
+        return match ? 1 : DIM_OPACITY
+      })
       return
     }
-    svg.selectAll<SVGPathElement, LinkDatum>('path').attr('opacity', function (d: any) {
-      return (d as LinkDatum).journeyId === hoverJourneyId ? HIGHLIGHT_OPACITY : DIM_OPACITY
-    })
-    svg.selectAll<SVGRectElement, NodeDatum>('rect').attr('opacity', function (d: any) {
-      const node = d as NodeDatum
-      const match = node.visits?.some(v => v.journeyId === hoverJourneyId)
-      return match ? 1 : DIM_OPACITY
-    })
-  }, [hoverJourneyId])
+
+    const focusKind = highlight?.side === 'ai' ? 'agent' : highlight?.side === 'human' ? 'human' : null
+
+    if (focusKind) {
+      svg.selectAll<SVGPathElement, LinkDatum>('path').attr('opacity', function (d: any) {
+        const meta = journeyMap.get((d as LinkDatum).journeyId)
+        return meta?.kind === focusKind ? NORMAL_OPACITY : DIM_OPACITY
+      })
+      svg.selectAll<SVGRectElement, NodeDatum>('rect').attr('opacity', function (d: any) {
+        const node = d as NodeDatum
+        const hasKind = node.visits?.some(v => journeyMap.get(v.journeyId)?.kind === focusKind)
+        return hasKind ? 1 : DIM_OPACITY
+      })
+      return
+    }
+
+    svg.selectAll('path').attr('opacity', NORMAL_OPACITY)
+    svg.selectAll('rect').attr('opacity', 1)
+  }, [hoverJourneyId, highlight, journeyMap])
 
   const onLegendClick = useCallback((id: string) => {
     setHiddenJourneyIds(prev => {
@@ -1197,8 +1217,20 @@ export default function SankeyDiagram({
       {/* Header */}
       <div style={{ marginBottom: 8, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>
-            Journey milestones
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>
+              Journey milestones
+            </div>
+            {highlight?.side && highlight.side !== 'both' && (
+              <span style={{
+                fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+                background: highlight.side === 'ai' ? `${AGENT_COLOR}18` : `${HUMAN_COLOR}18`,
+                color: highlight.side === 'ai' ? AGENT_COLOR : HUMAN_COLOR,
+                border: `1px solid ${highlight.side === 'ai' ? AGENT_COLOR : HUMAN_COLOR}`,
+              }}>
+                {highlight.side === 'ai' ? 'AI journeys highlighted' : 'Human journeys highlighted'}
+              </span>
+            )}
           </div>
           <div style={{ fontSize: '0.72rem', color: TEXT_MUTED }}>
             {agentJourneys.length} agent · {humanJourneys.length} human · link width = steps spent · hover for detail · click flow to inspect run

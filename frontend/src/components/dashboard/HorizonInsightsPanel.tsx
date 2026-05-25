@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import type { ComparativeAnalysis, ActionPointItem, JourneyResponse } from '../../lib/api'
+import type { ComparativeAnalysis, ActionPointItem, JourneyResponse, CompareHighlight } from '../../lib/api'
 import * as api from '../../lib/api'
 import type { AgentStep } from '../agent/agentTypes'
 
@@ -84,13 +84,21 @@ export default function HorizonInsightsPanel({
   compareLoading,
   agentJourneys,
   humanJourneySteps,
+  actionContext,
+  onClearActionContext,
 }: {
   compareAnalysis: ComparativeAnalysis | null
   compareLoading: boolean
   agentJourneys: JourneyResponse[]
   humanJourneySteps: AgentStep[][]
+  actionContext?: { note?: string; explanation?: string; highlight?: CompareHighlight } | null
+  onClearActionContext?: () => void
 }) {
   const [activeTab, setActiveTab] = useState<'guide' | 'insights'>('insights')
+
+  useEffect(() => {
+    if (actionContext) setActiveTab('insights')
+  }, [actionContext])
 
   const actionPoints = useMemo<HorizonActionPoint[]>(() => {
     if (!compareAnalysis) return []
@@ -200,6 +208,33 @@ export default function HorizonInsightsPanel({
       {/* ──────────────── ACTION POINTS TAB ──────────────── */}
       {activeTab === 'insights' && (
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+
+          {/* ── Action point context card (from "Verify in diagrams" link) ── */}
+          {actionContext && (
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button
+                onClick={onClearActionContext}
+                style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 'var(--fs-small)', color: 'var(--gray500)', fontWeight: 600, padding: '0 0 2px' }}
+              >← All insights</button>
+              {actionContext.note && (
+                <div style={{ background: 'var(--surface)', border: '1.5px solid var(--brand)', borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--brand)', marginBottom: 6 }}>Action Point</div>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>{actionContext.note}</p>
+                </div>
+              )}
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-primary)', marginBottom: 6 }}>How this diagram connects</div>
+                <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                  {actionContext.explanation ?? 'The highlighted journey strips show the evidence for this action point.'}
+                </p>
+              </div>
+              {actionContext.highlight?.side && actionContext.highlight.side !== 'both' && (
+                <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray500)' }}>
+                  Focus: <strong>{actionContext.highlight.side === 'ai' ? 'AI agent' : 'Human'}</strong> journey strips are highlighted below.
+                </p>
+              )}
+            </div>
+          )}
 
           {compareLoading && (
             <div style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--gray400)', fontSize: 'var(--fs-small)' }}>

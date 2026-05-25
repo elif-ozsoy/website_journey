@@ -294,7 +294,8 @@ export default function DashboardPage() {
   function handleNavigateTo(_tab: string, view?: string, note?: string, diagramRef?: DiagramRef) {
     const target = (view ? DIAGRAM_VIEW_MAP[view] : undefined) ?? 'aggregate'
     setActiveView(target)
-    if (target === 'human_vs_ai' && diagramRef) {
+    const HIGHLIGHT_VIEWS: ActiveView[] = ['human_vs_ai', 'flow_sankey', 'horizon_graph']
+    if (HIGHLIGHT_VIEWS.includes(target) && diagramRef) {
       setCompareContext({ highlight: diagramRef.highlight, note, explanation: diagramRef.diagram_explanation })
     } else {
       setCompareContext(null)
@@ -836,6 +837,7 @@ useEffect(() => {
                   agentLabels={agentLabels}
                   humanLabels={humanLabels}
                   onDivergencesChange={setSankeyDivergences}
+                  highlight={compareContext?.highlight}
                 />
               )}
             </div>
@@ -847,6 +849,8 @@ useEffect(() => {
                 agentJourneys={agentJourneys as api.JourneyResponse[]}
                 humanJourneySteps={humanJourneySteps}
                 divergences={sankeyDivergences}
+                actionContext={compareContext}
+                onClearActionContext={() => setCompareContext(null)}
               />
             </div>
           </div>
@@ -974,6 +978,7 @@ useEffect(() => {
                   humanJourneys={humanJourneySteps}
                   agentLabels={agentLabels}
                   humanLabels={humanLabels}
+                  highlight={compareContext?.highlight}
                 />
               )}
             </div>
@@ -984,6 +989,8 @@ useEffect(() => {
                 compareLoading={compareLoading}
                 agentJourneys={agentJourneys as api.JourneyResponse[]}
                 humanJourneySteps={humanJourneySteps}
+                actionContext={compareContext}
+                onClearActionContext={() => setCompareContext(null)}
               />
             </div>
           </div>
