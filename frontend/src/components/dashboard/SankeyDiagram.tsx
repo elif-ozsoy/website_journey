@@ -714,10 +714,11 @@ function detectDivergences(graph: Graph, journeyMap: Map<string, JourneyMeta>): 
     for (const v of node.visits) {
       const label = (v.elementLabel ?? '').trim()
       if (!label) continue
+      const canon = canonicalLabel(label)
       const vKind = journeyMap.get(v.journeyId)?.kind
 
       const existing = groups.find(g => {
-        if (g.label !== label) return false
+        if (canonicalLabel(g.label) !== canon) return false
         const rep = g.visits[0]
         const repKind = journeyMap.get(rep.journeyId)?.kind
         // Same canonical label is enough to merge ACROSS kinds (AI ↔ human)
@@ -733,8 +734,13 @@ function detectDivergences(graph: Graph, journeyMap: Map<string, JourneyMeta>): 
         return true
       })
 
-      if (existing) existing.visits.push(v)
-      else groups.push({ label, visits: [v] })
+      if (existing) {
+        // Prefer shorter raw label as the display representative
+        if (label.length < existing.label.length) existing.label = label
+        existing.visits.push(v)
+      } else {
+        groups.push({ label, visits: [v] })
+      }
     }
 
     if (groups.length < 2) continue
@@ -770,7 +776,9 @@ function detectDivergences(graph: Graph, journeyMap: Map<string, JourneyMeta>): 
     if (distinctChosenGroups.size < 2) continue   // all journeys chose the same group
 
     /* Step 3: rebuild presentable groups containing only one entry per journey
-     * (its FIRST visit), so the panel doesn't show clutter. */
+     * (its FIRST visit), so the panel doesn't show clutter. Use canonical label
+     * for grouping so "Lehrer:innen" and "Lehrer:innen – Liste" collapse into
+     * one bullet instead of appearing as duplicates. */
     const presentable: DivergenceGroup[] = []
     const seenJourney = new Set<string>()
     for (const v of node.visits) {
@@ -778,22 +786,15 @@ function detectDivergences(graph: Graph, journeyMap: Map<string, JourneyMeta>): 
       const label = (v.elementLabel ?? '').trim()
       if (!label) continue
       seenJourney.add(v.journeyId)
-      const vKind = journeyMap.get(v.journeyId)?.kind
 
-      const existing = presentable.find(g => {
-        if (g.label !== label) return false
-        const rep = g.visits[0]
-        const repKind = journeyMap.get(rep.journeyId)?.kind
-        const sameKind = vKind && repKind && vKind === repKind
-        if (sameKind && rep.elementCoords && v.elementCoords) {
-          const dx = Math.abs(rep.elementCoords.x - v.elementCoords.x)
-          const dy = Math.abs(rep.elementCoords.y - v.elementCoords.y)
-          if (dx > COORD_TOL || dy > COORD_TOL) return false
-        }
-        return true
-      })
-      if (existing) existing.visits.push(v)
-      else presentable.push({ label, visits: [v] })
+      const existing = presentable.find(g => canonicalLabel(g.label) === canonicalLabel(label))
+      if (existing) {
+        // Prefer shorter raw label as the display representative
+        if (label.length < existing.label.length) existing.label = label
+        existing.visits.push(v)
+      } else {
+        presentable.push({ label, visits: [v] })
+      }
     }
 
     if (presentable.length < 2) continue
