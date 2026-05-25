@@ -92,8 +92,15 @@ function IcoHeatmap() {
 }
 
 
-function IcoTimeline() {
-  return <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.5l2.5 1.5"/></svg>
+function IcoHorizonGraph() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1" y="3" width="14" height="4" rx="1" strokeOpacity="0.4" />
+      <path d="M1 5 Q4 3.5 6 5 Q8 6.5 10 5 Q12 3.5 15 4" />
+      <rect x="1" y="9" width="14" height="4" rx="1" strokeOpacity="0.4" />
+      <path d="M1 11 Q3 9.5 5 11 Q7 12.5 9 11 Q11 9.5 13 10 Q14 10.3 15 10" />
+    </svg>
+  )
 }
 
 function IcoHumanVsAI() {
@@ -218,7 +225,7 @@ export default function AppSidebar() {
     { view: 'aggregate', label: 'Aggregate Journeys', icon: <IcoSankey /> },
     { view: 'heatmap', label: 'Heatmap', icon: <IcoHeatmap /> },
     { view: 'human_vs_ai', label: 'Human vs AI', icon: <IcoHumanVsAI /> },
-    { view: 'time_event', label: 'Time-Event-Overview', icon: <IcoTimeline /> },
+    { view: 'horizon_graph', label: 'Horizon Graph', icon: <IcoHorizonGraph /> },
     { view: 'flow_sankey', label: 'Flow Diagram', icon: <IcoFlow /> },
 
   ]

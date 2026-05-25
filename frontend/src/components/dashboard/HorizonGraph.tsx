@@ -31,10 +31,10 @@ interface Props {
 }
 
 const AGENT_PALETTE = [
-  '#4f46e5', '#7c3aed', '#0ea5e9', '#2563eb', '#a855f7', '#6366f1',
+  '#32494B', '#3d5b5d', '#496e70', '#558183', '#619496', '#6da7a9',
 ]
 const HUMAN_PALETTE = [
-  '#0891b2', '#0e7490', '#0284c7', '#0369a1', '#0d9488', '#155e75',
+  '#881342', '#9e1852', '#b41e62', '#ca2472', '#e02a82', '#f63092',
 ]
 function colorForJourney(kind: 'agent' | 'human', index: number): string {
   const palette = kind === 'agent' ? AGENT_PALETTE : HUMAN_PALETTE
@@ -269,8 +269,8 @@ export default function HorizonGraph({
           {(['both', 'agent', 'human'] as KindFilter[]).map(k => {
             const active = kindFilter === k
             const lbl = k === 'both' ? 'All' : k === 'agent' ? 'AI only' : 'Humans only'
-            const baseColor = k === 'agent' ? AGENT_PALETTE[0]
-                            : k === 'human' ? HUMAN_PALETTE[0]
+            const baseColor = k === 'agent' ? '#32494B'
+                            : k === 'human' ? '#881342'
                             : '#475569'
             return (
               <button

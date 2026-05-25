@@ -8,6 +8,8 @@ import { PROJECTS_STORAGE_KEY } from '../lib/types'
 import * as api from '../lib/api'
 
 import SankeyDiagram, { type NodeDivergence } from '../components/dashboard/SankeyDiagram'
+import HorizonGraph from '../components/dashboard/HorizonGraph'
+import HorizonInsightsPanel from '../components/dashboard/HorizonInsightsPanel'
 
 
 // ─── Re-evaluate modal ────────────────────────────────────────────────────────
@@ -67,7 +69,7 @@ import type { CompareHighlight, DiagramRef } from '../lib/api'
 
 interface SelectOption { id: string; name: string; meta?: string }
 
-type ActiveView = 'overview' | 'aggregate' | 'heatmap' | 'human_vs_ai' | 'time_event' | 'flow_sankey'
+type ActiveView = 'overview' | 'aggregate' | 'heatmap' | 'human_vs_ai' | 'horizon_graph' | 'flow_sankey'
 // ─── Nav item icons ───────────────────────────────────────────────────────────
 
 // ─── Filter pills ─────────────────────────────────────────────────────────────
@@ -265,7 +267,7 @@ export default function DashboardPage() {
 
   const [searchParams, setSearchParams] = useSearchParams()
   const urlView = searchParams.get('view') ?? 'overview'
-  const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'human_vs_ai', 'time_event', 'flow_sankey'] as ActiveView[]).includes(urlView as ActiveView)
+  const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'human_vs_ai', 'horizon_graph', 'flow_sankey'] as ActiveView[]).includes(urlView as ActiveView)
     ? (urlView as ActiveView)
     : 'overview'
 
@@ -614,7 +616,7 @@ useEffect(() => {
                     aggregate: 'Aggregate Journeys',
                     heatmap: 'Heatmap',
                     human_vs_ai: 'Human vs AI',
-                    time_event: 'Time-Event-Overview',
+                    horizon_graph: 'Horizon Graph',
                     flow_sankey: 'Flow Diagram',
                   }[activeView]}
               </span>
@@ -923,11 +925,40 @@ useEffect(() => {
           </div>
         )}
 
-        {activeView === 'time_event' && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, background: 'var(--bg)' }}>
-            <div style={{ fontSize: 'var(--fs-headline)' }}>⏱</div>
-            <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>Time-Event-Overview</div>
-            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', maxWidth: 340, textAlign: 'center', lineHeight: 1.6 }}>This view is coming soon. It will show a timeline of events across all sessions.</div>
+        {activeView === 'horizon_graph' && (
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+            {/* ── Horizon graph (left) ── */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+              {agentJourneySteps.length === 0 && humanJourneySteps.length === 0 ? (
+                <div style={{
+                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexDirection: 'column', gap: 12, background: 'var(--bg)',
+                }}>
+                  <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    No journey data yet
+                  </div>
+                  <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', maxWidth: 340, textAlign: 'center', lineHeight: 1.6 }}>
+                    Run an agent or record a human session to see the horizon graph.
+                  </div>
+                </div>
+              ) : (
+                <HorizonGraph
+                  agentJourneys={agentJourneySteps}
+                  humanJourneys={humanJourneySteps}
+                  agentLabels={agentLabels}
+                  humanLabels={humanLabels}
+                />
+              )}
+            </div>
+            {/* ── Insights panel (right) ── */}
+            <div style={{ width: 320, flexShrink: 0, borderLeft: '1px solid var(--border)', overflowY: 'auto', background: 'var(--surface)' }}>
+              <HorizonInsightsPanel
+                compareAnalysis={compareAnalysis}
+                compareLoading={compareLoading}
+                agentJourneys={agentJourneys as api.JourneyResponse[]}
+                humanJourneySteps={humanJourneySteps}
+              />
+            </div>
           </div>
         )}
 
