@@ -83,8 +83,11 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
       binActions[b].push(a)
     }
     const maxCount = Math.max(1, ...counts)
-    /* Sample the step curve at bin centers; map across the pixel span. */
-    const xOf = (i: number) => active.xStart + ((i + 0.5) / nBins) * span
+    /* Map bins to evenly-spaced points anchored at BOTH edges: bin 0 sits at
+     * xStart and the last bin at xEnd, so the start/end spikes line up exactly
+     * with the start/terminal milestone lines (rather than being offset by half
+     * a bin, as bin-center placement would do). */
+    const xOf = (i: number) => active.xStart + (i / (nBins - 1)) * span
     const yOf = (v: number) => chartH - (v / maxCount) * chartH
     const area = (d3.area<number>()
       .x((_, i) => xOf(i)).y0(chartH).y1(v => yOf(v)).curve(d3.curveMonotoneX))(counts) ?? ''
@@ -103,10 +106,12 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
   const pctAtCursor = active && clampedX !== null && geom
     ? Math.round(((clampedX - active.xStart) / geom.span) * 100)
     : null
-  /* Index of the bin under the cursor, plus its count and actions. */
+  /* Index of the bin under the cursor, plus its count and actions. Uses the
+   * same edge-anchored mapping as the curve (round to nearest plotted point)
+   * so the popover matches the spike the cursor is over. */
   const binAtCursor = active && clampedX !== null && geom
     ? Math.min(geom.nBins - 1, Math.max(0,
-        Math.floor(((clampedX - active.xStart) / geom.span) * geom.nBins)))
+        Math.round(((clampedX - active.xStart) / geom.span) * (geom.nBins - 1))))
     : null
   const countAtCursor = binAtCursor !== null && geom ? geom.counts[binAtCursor] : null
   const actionsAtCursor = binAtCursor !== null && geom ? geom.binActions[binAtCursor] : []
