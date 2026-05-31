@@ -771,7 +771,8 @@ function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJou
     [humanJourneySteps, point.id],
   )
   const humanComments = ratingsSummary?.comments ?? []
-  const hasHumanData = humanJourneySteps.length > 0 || humanNarratives.length > 0 || humanComments.length > 0
+  // Used to gate the explain-human API call — needs actual narratives/comments to send.
+  const hasHumanData = humanNarratives.length > 0 || humanComments.length > 0
 
   const [agentExplanation, setAgentExplanation] = useState<string | null>(point.item.agent_explanation ?? null)
   const [agentExpLoading, setAgentExpLoading] = useState(false)
