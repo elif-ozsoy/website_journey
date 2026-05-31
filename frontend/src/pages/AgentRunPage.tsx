@@ -131,9 +131,8 @@ export default function AgentRunPage() {
     setSolutionEval(null)
     setStatusMessage('Connecting…')
 
-    const wsProtocol = agentUrl.startsWith('https') ? 'wss:' : 'ws:'
-    const wsHost = agentUrl.replace(/^https?:\/\//, '')
-    const ws = new WebSocket(`${wsProtocol}//${wsHost}/ws/run`)
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws/run`)
     wsRef.current = ws
 
     ws.onopen = () => {
