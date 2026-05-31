@@ -138,16 +138,6 @@ function IcoChevron() {
   return <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2l4 4-4 4"/></svg>
 }
 
-function IcoFlow() {
-  return <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="3" cy="4" r="1.3"/>
-    <circle cx="3" cy="12" r="1.3"/>
-    <circle cx="13" cy="8" r="1.3"/>
-    <path d="M4.2 4.3 Q9 5 11.8 7.4"/>
-    <path d="M4.2 11.7 Q9 11 11.8 8.6"/>
-  </svg>
-}
-
 // ─── Nav item ─────────────────────────────────────────────────────────────────
 
 function NavItem({
@@ -241,7 +231,6 @@ export default function AppSidebar() {
     { view: 'heatmap', label: 'Heatmap', icon: <IcoHeatmap /> },
     { view: 'human_vs_ai', label: 'Human vs AI', icon: <IcoHumanVsAI /> },
     { view: 'time_event', label: 'Time-Event-Overview', icon: <IcoTimeline /> },
-    { view: 'flow_sankey', label: 'Flow Diagram', icon: <IcoFlow /> },
     { view: 'horizon_graph', label: 'Horizon Graph', icon: <IcoHorizonGraph /> },
     { view: 'linked_flow', label: 'Flow + Horizon', icon: <IcoLinkedFlow /> },
 

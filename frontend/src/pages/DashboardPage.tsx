@@ -69,7 +69,7 @@ import type { CompareHighlight, DiagramRef } from '../lib/api'
 
 interface SelectOption { id: string; name: string; meta?: string }
 
-type ActiveView = 'overview' | 'aggregate' | 'heatmap' | 'human_vs_ai' | 'time_event' | 'horizon_graph' | 'flow_sankey' | 'linked_flow'// ─── Nav item icons ───────────────────────────────────────────────────────────
+type ActiveView = 'overview' | 'aggregate' | 'heatmap' | 'human_vs_ai' | 'time_event' | 'horizon_graph' | 'linked_flow'// ─── Nav item icons ───────────────────────────────────────────────────────────
 
 // ─── Filter pills ─────────────────────────────────────────────────────────────
 
@@ -267,7 +267,7 @@ export default function DashboardPage() {
 
   const [searchParams, setSearchParams] = useSearchParams()
   const urlView = searchParams.get('view') ?? 'overview'
-  const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'human_vs_ai', 'time_event', 'horizon_graph', 'flow_sankey', 'linked_flow'] as ActiveView[]).includes(urlView as ActiveView)    ? (urlView as ActiveView)
+  const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'human_vs_ai', 'time_event', 'horizon_graph', 'linked_flow'] as ActiveView[]).includes(urlView as ActiveView)    ? (urlView as ActiveView)
     : 'overview'
 
   // Only expose context when the user is on the view it was set for (must be after activeView)
@@ -277,7 +277,7 @@ export default function DashboardPage() {
 
   const DIAGRAM_VIEW_MAP: Partial<Record<string, ActiveView>> = {
     compare: 'human_vs_ai',
-    sankey: 'flow_sankey',
+    sankey: 'linked_flow',
     horizon: 'horizon_graph',
     linked_flow: 'linked_flow',
     heatmap: 'heatmap',
@@ -299,7 +299,7 @@ export default function DashboardPage() {
 
   function handleNavigateTo(_tab: string, view?: string, note?: string, diagramRef?: DiagramRef) {
     const target = (view ? DIAGRAM_VIEW_MAP[view] : undefined) ?? 'aggregate'
-    const HIGHLIGHT_VIEWS: ActiveView[] = ['human_vs_ai', 'flow_sankey', 'horizon_graph', 'linked_flow']
+    const HIGHLIGHT_VIEWS: ActiveView[] = ['human_vs_ai', 'horizon_graph', 'linked_flow']
     // Set context BEFORE changing view so that if setSearchParams triggers a
     // render before setCompareContext is batched, the context is already ready
     // when the diagram view mounts.
@@ -652,7 +652,6 @@ useEffect(() => {
                     heatmap: 'Heatmap',
                     human_vs_ai: 'Human vs AI',
                     time_event: 'Time-Event-Overview',
-                    flow_sankey: 'Flow Diagram',
                     horizon_graph: 'Horizon Graph',
                     linked_flow: 'Flow + Horizon',
                   }[activeView]}
@@ -841,55 +840,6 @@ useEffect(() => {
           </div>
         )}
 
-        {activeView === 'flow_sankey' && (
-          <div ref={rightPanelContainerRef} style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-            {/* ── Sankey diagram (left) ── */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-              {agentJourneySteps.length === 0 && humanJourneySteps.length === 0 ? (
-                <div style={{
-                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  flexDirection: 'column', gap: 12, background: 'var(--bg)',
-                }}>
-                  <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    No flow data yet
-                  </div>
-                  <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', maxWidth: 340, textAlign: 'center', lineHeight: 1.6 }}>
-                    Run an agent or record a human session to see the flow diagram.
-                  </div>
-                </div>
-              ) : (
-                <SankeyDiagram
-                  agentJourneys={agentJourneySteps}
-                  humanJourneys={humanJourneySteps}
-                  agentLabels={agentLabels}
-                  humanLabels={humanLabels}
-                  onDivergencesChange={setSankeyDivergences}
-                  highlight={activeCompareContext?.highlight}
-                />
-              )}
-            </div>
-            {/* Draggable divider */}
-            <div
-              onMouseDown={startRightPanelDrag}
-              style={{ width: 5, flexShrink: 0, cursor: 'col-resize', background: 'var(--border)', transition: 'background 0.15s' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'var(--border)')}
-            />
-            {/* ── Insights panel (right) ── */}
-            <div style={{ width: rightPanelW, flexShrink: 0, borderLeft: 'none', overflowY: 'auto', background: 'var(--surface)' }}>
-              <SankeyInsightsPanel
-                compareAnalysis={compareAnalysis}
-                compareLoading={compareLoading}
-                agentJourneys={agentJourneys as api.JourneyResponse[]}
-                humanJourneySteps={humanJourneySteps}
-                divergences={sankeyDivergences}
-                actionContext={activeCompareContext}
-                onClearActionContext={() => setCompareContext(null)}
-              />
-            </div>
-          </div>
-      )}
-
         {/* ── FLOW + HORIZON (linked) ── */}
         {activeView === 'linked_flow' && (
           <div ref={rightPanelContainerRef} style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -1062,7 +1012,6 @@ useEffect(() => {
                   humanJourneys={humanJourneySteps}
                   agentLabels={agentLabels}
                   humanLabels={humanLabels}
-                  highlight={activeCompareContext?.highlight}
                 />
               )}
             </div>
