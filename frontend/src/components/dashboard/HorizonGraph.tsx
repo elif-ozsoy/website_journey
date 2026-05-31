@@ -2,6 +2,10 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import * as d3 from 'd3'
 import type { AgentStep } from '../agent/agentTypes'
 import type { CompareHighlight } from '../../lib/api'
+import {
+  SAMPLE_COUNT, KDE_BANDWIDTH, buildJourneySamples, gaussianKDE,
+  type JourneySample,
+} from './horizonDensity'
 
 interface Props {
   agentJourneys: AgentStep[][]
@@ -29,8 +33,6 @@ const STRIP_HEIGHT  = 44
 const STRIP_LABEL_W = 160
 const STRIP_GAP     = 5
 const NUM_BANDS     = 3
-const SAMPLE_COUNT  = 240
-const KDE_BANDWIDTH = 0.05
 const CLICK_TOL     = 0.05
 
 /* ── Overlay chart constants ── */
@@ -52,54 +54,9 @@ const STEP_ACTION_COLORS: Record<string, string> = {
   done:            '#16a34a',
 }
 
-/* ── Step helpers ── */
-
-function isCountableAction(s: AgentStep): boolean {
-  const a = (s.action_type ?? '').toLowerCase()
-  return !(!a || a === 'unknown' || a === 'wait' || a === 'extract_content')
-}
-
-interface JourneySample {
-  relT: number
-  step: AgentStep
-  stepIdx: number
-}
-
-function buildJourneySamples(steps: AgentStep[]): JourneySample[] {
-  if (steps.length === 0) return []
-  const tsSteps = steps.filter(s => typeof (s as any).timestamp === 'number')
-  let useTs = false, t0 = 0, t1 = 0
-  if (tsSteps.length >= 2) {
-    t0 = (tsSteps[0] as any).timestamp
-    t1 = (tsSteps[tsSteps.length - 1] as any).timestamp
-    if (t1 > t0) useTs = true
-  }
-  const out: JourneySample[] = []
-  for (let i = 0; i < steps.length; i++) {
-    const s = steps[i]
-    if (!isCountableAction(s)) continue
-    let relT = steps.length > 1 ? i / (steps.length - 1) : 0
-    if (useTs && typeof (s as any).timestamp === 'number') {
-      relT = ((s as any).timestamp - t0) / (t1 - t0)
-    }
-    out.push({ relT: Math.max(0, Math.min(1, relT)), step: s, stepIdx: i })
-  }
-  return out
-}
-
-function gaussianKDE(samples: JourneySample[], bw: number, n: number): number[] {
-  const out = new Array(n).fill(0) as number[]
-  if (samples.length === 0) return out
-  const inv2 = 1 / (2 * bw * bw)
-  const norm = 1 / (bw * Math.sqrt(2 * Math.PI))
-  for (let g = 0; g < n; g++) {
-    const t = g / (n - 1)
-    let s = 0
-    for (const p of samples) { const d = t - p.relT; s += norm * Math.exp(-d * d * inv2) }
-    out[g] = s
-  }
-  return out
-}
+/* ── Step helpers ──
+ * isCountableAction / buildJourneySamples / gaussianKDE / JourneySample live in
+ * ./horizonDensity so the linked Flow + Horizon view shares the exact same math. */
 
 function shadeHex(hex: string, t: number): string {
   const m = hex.replace('#', '')

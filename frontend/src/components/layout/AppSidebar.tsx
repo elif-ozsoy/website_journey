@@ -107,6 +107,17 @@ function IcoHorizonGraph() {
   )
 }
 
+function IcoLinkedFlow() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 3 Q7 3 9 5" strokeOpacity="0.8" />
+      <path d="M2 6 Q8 6 11 4" strokeOpacity="0.8" />
+      <line x1="2" y1="9" x2="14" y2="9" strokeOpacity="0.3" />
+      <path d="M2 13 Q4 11.5 6 13 Q8 14 10 12.5 Q12 11.5 14 12" />
+    </svg>
+  )
+}
+
 function IcoHumanVsAI() {
   return <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="4" r="2"/><path d="M1 12.5c0-2.2 1.8-3.5 4-3.5s4 1.3 4 3.5"/><circle cx="13" cy="4" r="2"/><path d="M10 12.5c0-2.2.8-3.5 3-3.5" strokeDasharray="2 1.5"/></svg>
 }
@@ -232,6 +243,7 @@ export default function AppSidebar() {
     { view: 'time_event', label: 'Time-Event-Overview', icon: <IcoTimeline /> },
     { view: 'flow_sankey', label: 'Flow Diagram', icon: <IcoFlow /> },
     { view: 'horizon_graph', label: 'Horizon Graph', icon: <IcoHorizonGraph /> },
+    { view: 'linked_flow', label: 'Flow + Horizon', icon: <IcoLinkedFlow /> },
 
   ]
 

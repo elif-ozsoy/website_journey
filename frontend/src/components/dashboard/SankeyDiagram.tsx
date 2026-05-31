@@ -4,6 +4,8 @@ import { createPortal } from 'react-dom'
 import { sankey as d3Sankey, sankeyLinkHorizontal } from 'd3-sankey'
 import type { AgentStep } from '../agent/agentTypes'
 import type { CompareHighlight } from '../../lib/api'
+import LinkedHorizonStrip, { type ActiveJourney } from './LinkedHorizonStrip'
+import { densityForSteps } from './horizonDensity'
 
 /* ────────────────────────────────────────────────────────────────────────────
  *  Props
@@ -16,6 +18,9 @@ interface Props {
   humanLabels?: string[]
   onDivergencesChange?: (divergences: NodeDivergence[]) => void
   highlight?: CompareHighlight
+  /* When true, dock a per-journey horizon strip beneath the diagram and switch
+   * the click gesture to "pin" (double-click still opens the detail modal). */
+  linkedMode?: boolean
 }
 
 /* ── Color tokens ──
@@ -827,6 +832,7 @@ export default function SankeyDiagram({
   humanLabels,
   onDivergencesChange,
   highlight,
+  linkedMode = false,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -930,6 +936,16 @@ export default function SankeyDiagram({
 
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [hoverJourneyId, setHoverJourneyId] = useState<string | null>(null)
+
+  /* ── Linked-mode state (horizon strip) ────────────────────────────────────
+   * pinnedJourneyId  — journey kept active after the mouse leaves (click to pin)
+   * cursorX          — mouse x in Sankey inner coords, for the synced cursor
+   * svgW             — current SVG width, so the strip matches it exactly
+   * journeyExtents   — per-journey [xStart, xEnd] pixel span (Sankey inner coords) */
+  const [pinnedJourneyId, setPinnedJourneyId] = useState<string | null>(null)
+  const [cursorX, setCursorX] = useState<number | null>(null)
+  const [svgW, setSvgW] = useState(860)
+  const [journeyExtents, setJourneyExtents] = useState<Map<string, { xStart: number; xEnd: number }>>(new Map())
   /* Modal: when set, shows a full step-by-step view of this journey. */
   const [modalJourneyId, setModalJourneyId] = useState<string | null>(null)
 
@@ -1007,6 +1023,23 @@ export default function SankeyDiagram({
 
     const g = svg.append('g').attr('transform', `translate(${MARGIN.left},${MARGIN.top})`)
 
+    /* ── Linked mode: per-journey horizontal pixel span ────────────────────
+     * For each journey, find the left edge of its first node and the right edge
+     * of its last node. The docked horizon strip uses this span (in the same
+     * inner-coordinate system as `g`) so its time axis aligns with the flow. */
+    if (linkedMode) {
+      const extents = new Map<string, { xStart: number; xEnd: number }>()
+      for (const n of laidOut.nodes as any[]) {
+        for (const v of (n.visits ?? [])) {
+          const cur = extents.get(v.journeyId)
+          if (!cur) extents.set(v.journeyId, { xStart: n.x0, xEnd: n.x1 })
+          else { cur.xStart = Math.min(cur.xStart, n.x0); cur.xEnd = Math.max(cur.xEnd, n.x1) }
+        }
+      }
+      setJourneyExtents(extents)
+      setSvgW(W)
+    }
+
     /* ── Links: one ribbon per journey traversal ──────────────────────── */
     const linkSel = g.append('g')
       .attr('fill', 'none')
@@ -1023,12 +1056,21 @@ export default function SankeyDiagram({
       .attr('opacity', NORMAL_OPACITY)
       .attr('cursor', 'pointer')
 
+    /* Disambiguate single-click (pin) from double-click (inspect) in linked
+     * mode. Shared across both handlers since they're attached in one effect. */
+    let clickTimer: ReturnType<typeof setTimeout> | null = null
+
     linkSel.on('mousemove', function (event: MouseEvent, d: any) {
       const link = d as LinkDatum
       setHoverJourneyId(link.journeyId)
       const meta = journeyMap.get(link.journeyId)
       const step = meta?.steps[link.stepIdx]
       const rect = containerRef.current?.getBoundingClientRect()
+      if (linkedMode) {
+        // Mouse x in the same inner coords the strip uses (g is offset by MARGIN.left).
+        const svgRect = svgRef.current?.getBoundingClientRect()
+        setCursorX(event.clientX - (svgRect?.left ?? 0) - MARGIN.left)
+      }
       const fromNode = laidOut.nodes.find((n: any) =>
         n.id === (typeof link.source === 'object' ? (link.source as any).id : link.source))
       const toNode = laidOut.nodes.find((n: any) =>
@@ -1044,9 +1086,22 @@ export default function SankeyDiagram({
         rawSteps: link.rawSteps,
       })
     })
-    linkSel.on('mouseleave', () => { setHoverJourneyId(null); setTooltip(null) })
+    linkSel.on('mouseleave', () => { setHoverJourneyId(null); setTooltip(null); if (linkedMode) setCursorX(null) })
     linkSel.on('click', (_: MouseEvent, d: any) => {
       const link = d as LinkDatum
+      setTooltip(null)
+      if (!linkedMode) { setModalJourneyId(link.journeyId); return }
+      // Defer pin so a double-click can cancel it and open the detail modal.
+      if (clickTimer) clearTimeout(clickTimer)
+      clickTimer = setTimeout(() => {
+        setPinnedJourneyId(prev => (prev === link.journeyId ? null : link.journeyId))
+        clickTimer = null
+      }, 220)
+    })
+    linkSel.on('dblclick', (_: MouseEvent, d: any) => {
+      if (!linkedMode) return
+      const link = d as LinkDatum
+      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null }
       setTooltip(null)
       setModalJourneyId(link.journeyId)
     })
@@ -1170,20 +1225,22 @@ export default function SankeyDiagram({
         return hasKind ? 1 : DIM_OPACITY
       })
     }
-  }, [graph, journeyMap, journeys.length, hasData, nodeColor, divergentNodeIds, resizeTick, highlight])
+  }, [graph, journeyMap, journeys.length, hasData, nodeColor, divergentNodeIds, resizeTick, highlight, linkedMode])
 
   /* ── Hover / highlight: dim non-relevant journeys ───────────────────────── */
 
   useEffect(() => {
     const svg = d3.select(svgRef.current!)
 
-    if (hoverJourneyId) {
+    // A pinned journey (linked mode) stays highlighted when the mouse leaves.
+    const activeId = hoverJourneyId ?? pinnedJourneyId
+    if (activeId) {
       svg.selectAll<SVGPathElement, LinkDatum>('path').attr('opacity', function (d: any) {
-        return (d as LinkDatum).journeyId === hoverJourneyId ? HIGHLIGHT_OPACITY : DIM_OPACITY
+        return (d as LinkDatum).journeyId === activeId ? HIGHLIGHT_OPACITY : DIM_OPACITY
       })
       svg.selectAll<SVGRectElement, NodeDatum>('rect').attr('opacity', function (d: any) {
         const node = d as NodeDatum
-        const match = node.visits?.some(v => v.journeyId === hoverJourneyId)
+        const match = node.visits?.some(v => v.journeyId === activeId)
         return match ? 1 : DIM_OPACITY
       })
       return
@@ -1206,7 +1263,7 @@ export default function SankeyDiagram({
 
     svg.selectAll('path').attr('opacity', NORMAL_OPACITY)
     svg.selectAll('rect').attr('opacity', 1)
-  }, [hoverJourneyId, highlight, journeyMap, hasData])
+  }, [hoverJourneyId, pinnedJourneyId, highlight, journeyMap, hasData])
 
   const onLegendClick = useCallback((id: string) => {
     setHiddenJourneyIds(prev => {
@@ -1223,6 +1280,26 @@ export default function SankeyDiagram({
 
   const allHidden = hiddenJourneyIds.size === journeys.length && journeys.length > 0
   const someHidden = hiddenJourneyIds.size > 0 && !allHidden
+
+  /* The journey whose horizon strip is shown: the hovered flow, or the pinned
+   * one when nothing is hovered. */
+  const activeJourney = useMemo<ActiveJourney | null>(() => {
+    if (!linkedMode) return null
+    const id = hoverJourneyId ?? pinnedJourneyId
+    if (!id) return null
+    const meta = journeyMap.get(id)
+    const ext = journeyExtents.get(id)
+    if (!meta || !ext) return null
+    return {
+      journeyId: id,
+      label: meta.label,
+      color: colorForJourney(meta.kind, meta.index),
+      xStart: ext.xStart,
+      xEnd: ext.xEnd,
+      density: densityForSteps(meta.steps),
+      pinned: pinnedJourneyId === id,
+    }
+  }, [linkedMode, hoverJourneyId, pinnedJourneyId, journeyMap, journeyExtents])
 
   return (
     <div style={{
@@ -1249,7 +1326,7 @@ export default function SankeyDiagram({
             )}
           </div>
           <div style={{ fontSize: '0.72rem', color: TEXT_MUTED }}>
-            {agentJourneys.length} agent · {humanJourneys.length} human · link width = steps spent · hover for detail · click flow to inspect run
+            {agentJourneys.length} agent · {humanJourneys.length} human · link width = steps spent · {linkedMode ? 'hover a flow for its timeline · click to pin · double-click to inspect' : 'hover for detail · click flow to inspect run'}
           </div>
         </div>
         {/* Filter buttons */}
@@ -1322,6 +1399,16 @@ export default function SankeyDiagram({
           </div>
         )}
       </div>
+
+      {/* Docked horizon strip — only in linked mode */}
+      {linkedMode && hasData && (
+        <LinkedHorizonStrip
+          width={svgW}
+          marginLeft={MARGIN.left}
+          active={activeJourney}
+          cursorX={cursorX}
+        />
+      )}
 
       {/* Journey detail modal — portal escapes overflow:hidden ancestors */}
       {modalJourneyId && (() => {
