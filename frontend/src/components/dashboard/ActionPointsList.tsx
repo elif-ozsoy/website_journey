@@ -539,8 +539,8 @@ export default function ActionPointsList({
             ratingsSummary={ratingsSummary}
             onDone={() => { const was = (statuses[selected.id] ?? 'open') === 'done'; setStatus(selected.id, was ? 'open' : 'done'); if (!was) advance() }}
             onSkip={() => { const was = (statuses[selected.id] ?? 'open') === 'skipped'; setStatus(selected.id, was ? 'open' : 'skipped'); if (!was) advance() }}
-            onPrev={() => { const i = points.findIndex(p => p.id === selected.id); setSelectedId(points[(i - 1 + points.length) % points.length].id) }}
-            onNext={() => { const i = points.findIndex(p => p.id === selected.id); setSelectedId(points[(i + 1) % points.length].id) }}
+            onPrev={() => { const i = points.findIndex(p => p.id === selected.id); if (i > 0) setSelectedId(points[i - 1].id) }}
+            onNext={() => { const i = points.findIndex(p => p.id === selected.id); if (i < points.length - 1) setSelectedId(points[i + 1].id) }}
             onNavigateTo={onNavigateTo}
             compact={compact}
           />
@@ -981,15 +981,15 @@ function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJou
           color: status === 'skipped' ? 'var(--gray400)' : 'var(--gray600)',
         }}>{status === 'skipped' ? 'Restore' : 'Skip'}</button>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 5 }}>
-          <button onClick={onPrev} style={{
+          <button onClick={onPrev} disabled={idx === 0} style={{
             padding: '6px 12px', borderRadius: 8, fontSize: 'var(--fs-body)', fontWeight: 600,
-            cursor: 'pointer', border: '1px solid var(--border)', background: 'var(--surface)',
-            color: 'var(--gray700)',
+            cursor: idx === 0 ? 'not-allowed' : 'pointer', border: '1px solid var(--border)', background: 'var(--surface)',
+            color: 'var(--gray700)', opacity: idx === 0 ? 0.4 : 1,
           }}>← Prev</button>
-          <button onClick={onNext} style={{
+          <button onClick={onNext} disabled={idx >= total - 1} style={{
             padding: '6px 14px', borderRadius: 8, fontSize: 'var(--fs-body)', fontWeight: 600,
-            cursor: 'pointer', border: '1px solid var(--border)', background: 'var(--surface)',
-            color: 'var(--gray700)',
+            cursor: idx >= total - 1 ? 'not-allowed' : 'pointer', border: '1px solid var(--border)', background: 'var(--surface)',
+            color: 'var(--gray700)', opacity: idx >= total - 1 ? 0.4 : 1,
           }}>Next →</button>
         </div>
       </div>
