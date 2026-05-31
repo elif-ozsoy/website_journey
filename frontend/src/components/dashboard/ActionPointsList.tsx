@@ -771,7 +771,7 @@ function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJou
     [humanJourneySteps, point.id],
   )
   const humanComments = ratingsSummary?.comments ?? []
-  const hasHumanData = humanNarratives.length > 0 || humanComments.length > 0
+  const hasHumanData = humanJourneySteps.length > 0 || humanNarratives.length > 0 || humanComments.length > 0
 
   const [agentExplanation, setAgentExplanation] = useState<string | null>(point.item.agent_explanation ?? null)
   const [agentExpLoading, setAgentExpLoading] = useState(false)
@@ -855,7 +855,7 @@ function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJou
       )}
 
       {/* Human vs Agent behaviour bullets */}
-      {(point.item.human_bullets?.length || point.item.agent_bullets?.length) ? (
+      {(point.item.human_bullets?.length || point.item.agent_bullets?.length || humanJourneySteps.length > 0) ? (
         <div style={{ borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid var(--border)' }}>
             <div style={{ padding: '6px 10px', borderRight: '1px solid var(--border)', background: 'var(--gray50)' }}>
@@ -867,11 +867,11 @@ function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJou
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
             <ul style={{ margin: 0, padding: '8px 10px 8px 22px', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {(point.item.human_bullets ?? []).map((b, i) => (
+              {(point.item.human_bullets?.length ? point.item.human_bullets : humanNarratives).map((b, i) => (
                 <li key={i} style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.5 }}>{b}</li>
               ))}
-              {!point.item.human_bullets?.length && (
-                <li style={{ listStyle: 'none', fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>No human data</li>
+              {!point.item.human_bullets?.length && humanNarratives.length === 0 && humanJourneySteps.length > 0 && (
+                <li style={{ listStyle: 'none', fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>Human sessions recorded — re-run analysis to include</li>
               )}
             </ul>
             <ul style={{ margin: 0, padding: '8px 10px 8px 22px', display: 'flex', flexDirection: 'column', gap: 4 }}>
