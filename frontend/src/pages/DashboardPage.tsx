@@ -1012,6 +1012,7 @@ useEffect(() => {
                   humanJourneys={humanJourneySteps}
                   agentLabels={agentLabels}
                   humanLabels={humanLabels}
+                  highlight={activeCompareContext?.highlight}
                 />
               )}
             </div>
