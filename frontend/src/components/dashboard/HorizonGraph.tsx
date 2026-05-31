@@ -84,8 +84,8 @@ function OverlayDensityChart({
     hasHuman ? Math.max(...humanCounts) : 0,
     0,
   )
-  /* Round up to a nice integer tick ceiling */
-  const niceMax = rawMax <= 0 ? 1 : Math.ceil(rawMax)
+  /* Normalize so the busiest time slice reads 100%. */
+  const niceMax = rawMax <= 0 ? 1 : rawMax
 
   const xOf = (i: number) => (i / (HIST_BINS - 1)) * chartW
   const yOf = (v: number) => chartH - (v / niceMax) * chartH
@@ -105,15 +105,8 @@ function OverlayDensityChart({
   const agentPeakX = hasAgent ? peakOf(agentCounts) : null
   const humanPeakX = hasHuman ? peakOf(humanCounts) : null
 
-  /* Integer y-axis ticks */
-  const yTicks = useMemo(() => {
-    const maxTicks = 5
-    const step = Math.max(1, Math.ceil(niceMax / maxTicks))
-    const ticks: number[] = []
-    for (let v = 0; v <= niceMax; v += step) ticks.push(v)
-    if (ticks[ticks.length - 1] !== niceMax) ticks.push(niceMax)
-    return ticks
-  }, [niceMax])
+  /* Percentage y-axis ticks (fraction of the busiest slice). */
+  const yTicks = [0, 0.25, 0.5, 0.75, 1]
 
   return (
     <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -150,14 +143,14 @@ function OverlayDensityChart({
           <rect x={0} y={0} width={chartW} height={chartH} fill="#f8fafc" rx={4} />
 
           {/* Y-axis gridlines + tick labels */}
-          {yTicks.map(v => {
-            const py = yOf(v)
+          {yTicks.map(f => {
+            const py = chartH - f * chartH
             return (
-              <g key={v}>
+              <g key={f}>
                 <line x1={0} x2={chartW} y1={py} y2={py} stroke="#e2e8f0" strokeWidth={1} />
                 <text x={-6} y={py} textAnchor="end" dominantBaseline="middle"
                   fontSize={9} fill="#94a3b8" fontFamily="Inter, system-ui, sans-serif">
-                  {v}
+                  {Math.round(f * 100)}%
                 </text>
               </g>
             )
@@ -237,7 +230,7 @@ function OverlayDensityChart({
             textAnchor="middle" fontSize={9} fill="#94a3b8"
             fontFamily="Inter, system-ui, sans-serif"
             style={{ textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Avg actions
+            Activity
           </text>
 
           {/* Hover cursor */}
@@ -358,7 +351,7 @@ export default function HorizonGraph({
             )}
           </div>
           <div style={{ fontSize: '0.7rem', color: TEXT_MUTED, marginTop: 2 }}>
-            Average action count per time slice across all journeys
+            Share of activity across journey time (relative to the busiest slice)
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
