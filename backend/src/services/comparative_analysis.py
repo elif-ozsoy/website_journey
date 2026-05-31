@@ -325,7 +325,32 @@ def _post_process(result: dict) -> dict:
                     log.debug("Dedup: dropping duplicate %s item: %.60s", key, text)
                     continue
                 seen.add(norm)
+                if isinstance(item, dict):
+                    _ensure_diagram(item)
                 cleaned.append(item)
             task[key] = cleaned
 
     return result
+
+
+def _ensure_diagram(item: dict) -> None:
+    """Guarantee every action point links to at least one diagram so the UI
+    always shows a "Verify in diagrams" link. Models (especially the fallback
+    providers) frequently omit the optional diagrams array; we fall back to the
+    "compare" view, whose side we derive from the point type."""
+    diagrams = item.get("diagrams")
+    if isinstance(diagrams, list) and len(diagrams) > 0:
+        return
+    point_type = item.get("type")
+    side = "ai" if point_type == "agent_gap" else "human" if point_type == "human_issue" else "both"
+    item["diagrams"] = [
+        {
+            "view": "compare",
+            "reason": "Compare AI vs human effort and action mix for this task.",
+            "highlight": {"side": side, "sections": ["stats", "steps_per_page"]},
+            "diagram_explanation": (
+                "Review the AI-vs-human step counts and per-page effort to see "
+                "the evidence behind this action point."
+            ),
+        }
+    ]
