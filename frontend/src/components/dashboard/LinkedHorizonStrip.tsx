@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import * as d3 from 'd3'
+import type { ActionSample } from './horizonDensity'
 
 /* ────────────────────────────────────────────────────────────────────────────
  *  LinkedHorizonStrip
@@ -21,6 +22,17 @@ const PAD = { top: 28, bottom: 34 }
 const TEXT_MUTED = '#94a3b8'
 const GRID_COLOR = '#e8edf2'
 const BIN_PX = 22   // target pixel width per action-count bin
+const POPOVER_W = 280
+
+const STEP_ACTION_COLORS: Record<string, string> = {
+  click_element:   '#185FA5',
+  input_text:      '#059669',
+  go_to_url:       '#d97706',
+  scroll:          '#0891b2',
+  go_back:         '#f43f5e',
+  extract_content: '#7c3aed',
+  done:            '#16a34a',
+}
 
 export interface ActiveJourney {
   journeyId: string
@@ -28,8 +40,8 @@ export interface ActiveJourney {
   color: string
   xStart: number
   xEnd: number
-  /* Relative-time (0..1) of every countable action in the journey. */
-  actionTimes: number[]
+  /* Every countable action in the journey, flattened for display. */
+  actions: ActionSample[]
   /* Ordered milestone positions (Sankey inner coords) for the journey. */
   milestones: Array<{ x: number; label: string }>
   pinned: boolean
@@ -58,9 +70,12 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
      * a consistent size regardless of how many actions the journey had. */
     const nBins = Math.max(4, Math.min(40, Math.round(span / BIN_PX)))
     const counts = new Array(nBins).fill(0) as number[]
-    for (const t of active.actionTimes) {
-      const b = Math.min(nBins - 1, Math.max(0, Math.floor(t * nBins)))
+    /* Keep the actions that fall in each bin so we can list them on hover. */
+    const binActions: ActionSample[][] = Array.from({ length: nBins }, () => [])
+    for (const a of active.actions) {
+      const b = Math.min(nBins - 1, Math.max(0, Math.floor(a.relT * nBins)))
       counts[b]++
+      binActions[b].push(a)
     }
     const maxCount = Math.max(1, ...counts)
     /* Sample the step curve at bin centers; map across the pixel span. */
@@ -72,8 +87,8 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
       .x((_, i) => xOf(i)).y(v => yOf(v)).curve(d3.curveMonotoneX))(counts) ?? ''
     let peakI = 0, peakV = -Infinity
     counts.forEach((v, i) => { if (v > peakV) { peakV = v; peakI = i } })
-    const total = active.actionTimes.length
-    return { span, nBins, counts, maxCount, total, area, line, xOf, yOf, peakX: peakV > 0 ? xOf(peakI) : null }
+    const total = active.actions.length
+    return { span, nBins, counts, binActions, maxCount, total, area, line, xOf, yOf, peakX: peakV > 0 ? xOf(peakI) : null }
   }, [active, chartH])
 
   const effectiveX = localX ?? cursorX
@@ -83,11 +98,13 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
   const pctAtCursor = active && clampedX !== null && geom
     ? Math.round(((clampedX - active.xStart) / geom.span) * 100)
     : null
-  /* Action count in the bin under the cursor. */
-  const countAtCursor = active && clampedX !== null && geom
-    ? geom.counts[Math.min(geom.nBins - 1, Math.max(0,
-        Math.floor(((clampedX - active.xStart) / geom.span) * geom.nBins)))]
+  /* Index of the bin under the cursor, plus its count and actions. */
+  const binAtCursor = active && clampedX !== null && geom
+    ? Math.min(geom.nBins - 1, Math.max(0,
+        Math.floor(((clampedX - active.xStart) / geom.span) * geom.nBins)))
     : null
+  const countAtCursor = binAtCursor !== null && geom ? geom.counts[binAtCursor] : null
+  const actionsAtCursor = binAtCursor !== null && geom ? geom.binActions[binAtCursor] : []
 
   const dedupedMilestones = useMemo(() => {
     if (!active) return []
@@ -106,8 +123,68 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
     return [0, Math.round(m / 2), m]
   }, [geom])
 
+  /* Pixel x of the cursor within the wrapping div (svg coords + marginLeft). */
+  const cursorPx = clampedX !== null ? marginLeft + clampedX : null
+  /* Clamp the popover horizontally so it never overflows the strip. */
+  const popoverLeft = cursorPx !== null
+    ? Math.max(4, Math.min(width - POPOVER_W - 4, cursorPx - POPOVER_W / 2))
+    : 0
+
   return (
-    <div style={{ flexShrink: 0, borderTop: '1px solid #e2e8f0', background: '#fff' }}>
+    <div style={{ flexShrink: 0, borderTop: '1px solid #e2e8f0', background: '#fff', position: 'relative' }}>
+      {/* Action popover — lists the actions in the time-bin under the cursor,
+       *  mirroring the standalone Horizon Graph's slice detail. */}
+      {active && cursorPx !== null && actionsAtCursor.length > 0 && (
+        <div style={{
+          position: 'absolute', left: popoverLeft, top: 6, width: POPOVER_W,
+          background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6,
+          boxShadow: '0 8px 28px rgba(15,23,42,0.18)', zIndex: 20,
+          fontFamily: 'Inter, system-ui, sans-serif', overflow: 'hidden',
+          pointerEvents: 'none',
+        }}>
+          <div style={{
+            padding: '6px 10px', borderBottom: '1px solid #f1f5f9',
+            fontSize: '0.68rem', fontWeight: 700, color: '#334155',
+            display: 'flex', justifyContent: 'space-between', gap: 8,
+          }}>
+            <span>{actionsAtCursor.length} action{actionsAtCursor.length === 1 ? '' : 's'} @ {pctAtCursor}%</span>
+            <span style={{ color: TEXT_MUTED, fontWeight: 500 }}>{active.label}</span>
+          </div>
+          <div style={{ maxHeight: 150, overflowY: 'auto' }}>
+            {actionsAtCursor.slice(0, 6).map((a, i) => {
+              const ac = STEP_ACTION_COLORS[a.actionType] ?? '#475569'
+              return (
+                <div key={i} style={{
+                  padding: '6px 10px', borderBottom: '1px solid #f8fafc',
+                  display: 'flex', alignItems: 'flex-start', gap: 8,
+                }}>
+                  <span style={{
+                    fontSize: '0.6rem', fontWeight: 700, color: ac, background: `${ac}18`,
+                    padding: '2px 5px', borderRadius: 3, textTransform: 'uppercase',
+                    letterSpacing: '0.02em', flexShrink: 0, minWidth: 70, textAlign: 'center',
+                  }}>{a.actionType.replace(/_/g, ' ')}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.7rem', color: '#334155', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {a.path}
+                    </div>
+                    {a.detail && (
+                      <div style={{ fontSize: '0.66rem', color: TEXT_MUTED, marginTop: 1, lineHeight: 1.35 }}>
+                        {a.detail.slice(0, 90)}{a.detail.length > 90 ? '…' : ''}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+            {actionsAtCursor.length > 6 && (
+              <div style={{ padding: '5px 10px', fontSize: '0.64rem', color: TEXT_MUTED, fontStyle: 'italic' }}>
+                +{actionsAtCursor.length - 6} more…
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <svg width={width} height={STRIP_TOTAL_H} style={{ display: 'block' }}
         onMouseMove={e => {
           const rect = e.currentTarget.getBoundingClientRect()

@@ -5,7 +5,7 @@ import { sankey as d3Sankey, sankeyLinkHorizontal } from 'd3-sankey'
 import type { AgentStep } from '../agent/agentTypes'
 import type { CompareHighlight } from '../../lib/api'
 import LinkedHorizonStrip, { type ActiveJourney } from './LinkedHorizonStrip'
-import { actionRelTimes } from './horizonDensity'
+import { actionSamples } from './horizonDensity'
 
 /* ────────────────────────────────────────────────────────────────────────────
  *  Props
@@ -1314,7 +1314,7 @@ export default function SankeyDiagram({
       color: colorForJourney(meta.kind, meta.index),
       xStart: ext.xStart,
       xEnd: ext.xEnd,
-      actionTimes: actionRelTimes(meta.steps),
+      actions: actionSamples(meta.steps),
       milestones: journeyMilestones.get(id) ?? [],
       pinned: pinnedJourneyId === id,
     }

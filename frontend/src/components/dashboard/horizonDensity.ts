@@ -76,3 +76,25 @@ export function densityForSteps(steps: AgentStep[]): number[] {
 export function actionRelTimes(steps: AgentStep[]): number[] {
   return buildJourneySamples(steps).map(s => s.relT)
 }
+
+/* A countable action, flattened for display in the linked horizon strip. */
+export interface ActionSample {
+  relT: number
+  stepIdx: number
+  actionType: string
+  path: string
+  detail: string
+}
+
+export function actionSamples(steps: AgentStep[]): ActionSample[] {
+  return buildJourneySamples(steps).map(({ relT, step, stepIdx }) => {
+    const actionType = step.action_type ?? 'step'
+    let path = step.url ?? ''
+    try { path = new URL(step.url).pathname || '/' } catch { /* keep raw */ }
+    const det = (step as any).action_details ?? {}
+    const detail = typeof det === 'object' && det !== null
+      ? String(det.text ?? det.value ?? det.url ?? det.element_text ?? '')
+      : ''
+    return { relT, stepIdx, actionType, path, detail }
+  })
+}
