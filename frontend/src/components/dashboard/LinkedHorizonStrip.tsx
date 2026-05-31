@@ -70,7 +70,15 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
 
   const geom = useMemo(() => {
     if (!active) return null
-    const span = Math.max(1, active.xEnd - active.xStart)
+    /* Anchor the curve's time axis to the first/last MILESTONE CENTERS rather
+     * than the node edges. The milestone marker lines are drawn at node centers,
+     * so the start spike (relT 0) and end spike (relT 1) then line up exactly
+     * with the start / terminal milestone lines. Falls back to the node-edge
+     * extents when no milestones are available. */
+    const ms = active.milestones
+    const x0 = ms.length ? ms[0].x : active.xStart
+    const x1 = ms.length ? ms[ms.length - 1].x : active.xEnd
+    const span = Math.max(1, x1 - x0)
     /* Bin the actions over time. Bin count derives from pixel width so bars are
      * a consistent size regardless of how many actions the journey had. */
     const nBins = Math.max(4, Math.min(40, Math.round(span / BIN_PX)))
@@ -83,11 +91,8 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
       binActions[b].push(a)
     }
     const maxCount = Math.max(1, ...counts)
-    /* Map bins to evenly-spaced points anchored at BOTH edges: bin 0 sits at
-     * xStart and the last bin at xEnd, so the start/end spikes line up exactly
-     * with the start/terminal milestone lines (rather than being offset by half
-     * a bin, as bin-center placement would do). */
-    const xOf = (i: number) => active.xStart + (i / (nBins - 1)) * span
+    /* Map bins to evenly-spaced points anchored at both endpoints. */
+    const xOf = (i: number) => x0 + (i / (nBins - 1)) * span
     const yOf = (v: number) => chartH - (v / maxCount) * chartH
     const area = (d3.area<number>()
       .x((_, i) => xOf(i)).y0(chartH).y1(v => yOf(v)).curve(d3.curveMonotoneX))(counts) ?? ''
@@ -96,22 +101,22 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
     let peakI = 0, peakV = -Infinity
     counts.forEach((v, i) => { if (v > peakV) { peakV = v; peakI = i } })
     const total = active.actions.length
-    return { span, nBins, counts, binActions, maxCount, total, area, line, xOf, yOf, peakX: peakV > 0 ? xOf(peakI) : null }
+    return { x0, x1, span, nBins, counts, binActions, maxCount, total, area, line, xOf, yOf, peakX: peakV > 0 ? xOf(peakI) : null }
   }, [active, chartH])
 
   const effectiveX = localX ?? cursorX
-  const clampedX = active && effectiveX !== null
-    ? Math.max(active.xStart, Math.min(active.xEnd, effectiveX))
+  const clampedX = active && geom && effectiveX !== null
+    ? Math.max(geom.x0, Math.min(geom.x1, effectiveX))
     : null
-  const pctAtCursor = active && clampedX !== null && geom
-    ? Math.round(((clampedX - active.xStart) / geom.span) * 100)
+  const pctAtCursor = clampedX !== null && geom
+    ? Math.round(((clampedX - geom.x0) / geom.span) * 100)
     : null
   /* Index of the bin under the cursor, plus its count and actions. Uses the
    * same edge-anchored mapping as the curve (round to nearest plotted point)
    * so the popover matches the spike the cursor is over. */
-  const binAtCursor = active && clampedX !== null && geom
+  const binAtCursor = clampedX !== null && geom
     ? Math.min(geom.nBins - 1, Math.max(0,
-        Math.round(((clampedX - active.xStart) / geom.span) * (geom.nBins - 1))))
+        Math.round(((clampedX - geom.x0) / geom.span) * (geom.nBins - 1))))
     : null
   const countAtCursor = binAtCursor !== null && geom ? geom.counts[binAtCursor] : null
   const actionsAtCursor = binAtCursor !== null && geom ? geom.binActions[binAtCursor] : []
@@ -230,7 +235,7 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
           ) : (
             <>
               {/* Strip background */}
-              <rect x={active.xStart} y={0} width={geom.span} height={chartH}
+              <rect x={geom.x0} y={0} width={geom.span} height={chartH}
                 fill="#f8fafc" rx={3} />
 
               {/* ── Y-axis: integer gridlines + labels drawn INSIDE the plot ── */}
@@ -238,11 +243,11 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
                 const y = geom.yOf(t)
                 return (
                   <g key={t}>
-                    <line x1={active.xStart} x2={active.xEnd} y1={y} y2={y}
+                    <line x1={geom.x0} x2={geom.x1} y1={y} y2={y}
                       stroke={t === 0 ? '#cbd5e1' : GRID_COLOR} strokeWidth={1}
                       strokeDasharray={t === 0 ? undefined : '3,3'} />
                     {/* Label sits just inside the left edge with a white halo. */}
-                    <text x={active.xStart + 3} y={y - 2}
+                    <text x={geom.x0 + 3} y={y - 2}
                       fontSize={8.5} fill={TEXT_MUTED} fontWeight={600}
                       fontFamily="Inter, system-ui, sans-serif"
                       paintOrder="stroke" stroke="#f8fafc" strokeWidth={3}>
@@ -252,7 +257,7 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
                 )
               })}
               {/* Y-axis caption */}
-              <text x={active.xStart + 3} y={-3}
+              <text x={geom.x0 + 3} y={-3}
                 fontSize={8} fill={TEXT_MUTED}
                 fontFamily="Inter, system-ui, sans-serif"
                 style={{ textTransform: 'uppercase', letterSpacing: '0.04em' } as any}>
@@ -261,9 +266,9 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
 
               {/* Connector bracket tying the strip to the flow above */}
               <path
-                d={`M${active.xStart},-5 L${active.xStart},2 M${active.xEnd},-5 L${active.xEnd},2`}
+                d={`M${geom.x0},-5 L${geom.x0},2 M${geom.x1},-5 L${geom.x1},2`}
                 stroke={active.color} strokeWidth={1.5} strokeOpacity={0.5} fill="none" />
-              <line x1={active.xStart} x2={active.xEnd} y1={-5} y2={-5}
+              <line x1={geom.x0} x2={geom.x1} y1={-5} y2={-5}
                 stroke={active.color} strokeWidth={1.5} strokeOpacity={0.5} />
 
               {/* Action-count area + line */}
@@ -314,7 +319,7 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
               )}
 
               {/* Journey label / pinned badge + total action count */}
-              <text x={active.xEnd} y={-14} textAnchor="end"
+              <text x={geom.x1} y={-14} textAnchor="end"
                 fontSize={10} fontWeight={700} fill={active.color}
                 fontFamily="Inter, system-ui, sans-serif">
                 {active.label} · {geom.total} actions{active.pinned ? ' · pinned' : ''}

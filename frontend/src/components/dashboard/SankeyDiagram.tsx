@@ -1083,7 +1083,6 @@ export default function SankeyDiagram({
       setHoverJourneyId(link.journeyId)
       const meta = journeyMap.get(link.journeyId)
       const step = meta?.steps[link.stepIdx]
-      const rect = containerRef.current?.getBoundingClientRect()
       if (linkedMode) {
         // Mouse x in the same inner coords the strip uses (g is offset by MARGIN.left).
         const svgRect = svgRef.current?.getBoundingClientRect()
@@ -1094,8 +1093,8 @@ export default function SankeyDiagram({
       const toNode = laidOut.nodes.find((n: any) =>
         n.id === (typeof link.target === 'object' ? (link.target as any).id : link.target))
       setTooltip({
-        x: event.clientX - (rect?.left ?? 0) + 14,
-        y: event.clientY - (rect?.top ?? 0) + 14,
+        x: event.clientX,
+        y: event.clientY,
         kind: 'link',
         fromName: fromNode?.name ?? '',
         toName: toNode?.name ?? '',
@@ -1143,10 +1142,9 @@ export default function SankeyDiagram({
       setHoverJourneyId(null)
       const meta = journeyMap.get(last.journeyId)
       const step = meta?.steps[last.stepIdx]
-      const rect = containerRef.current?.getBoundingClientRect()
       setTooltip({
-        x: event.clientX - (rect?.left ?? 0) + 14,
-        y: event.clientY - (rect?.top ?? 0) + 14,
+        x: event.clientX,
+        y: event.clientY,
         kind: 'node',
         nodeName: node.name,
         step,
@@ -1396,28 +1394,44 @@ export default function SankeyDiagram({
           </div>
         )}
 
-        {tooltip && (
+      </div>
+
+      {/* Tooltip — portalled to <body> and clamped to the viewport so the
+       *  screenshot card never falls off-screen near the right/bottom edges. */}
+      {tooltip && createPortal((() => {
+        const TT_W = 360
+        const TT_H = 360   // generous estimate incl. screenshot
+        const gap = 16
+        // Prefer right/below the cursor; flip to left/above when near an edge.
+        let left = tooltip.x + gap
+        if (left + TT_W > window.innerWidth - 8) left = tooltip.x - TT_W - gap
+        left = Math.max(8, Math.min(left, window.innerWidth - TT_W - 8))
+        let top = tooltip.y + gap
+        if (top + TT_H > window.innerHeight - 8) top = window.innerHeight - TT_H - 8
+        top = Math.max(8, top)
+        return (
           <div
             style={{
-              position: 'absolute',
-              left: tooltip.x, top: tooltip.y,
+              position: 'fixed',
+              left, top,
               pointerEvents: 'none',
               background: '#ffffff',
               border: `1px solid ${BORDER}`,
               borderRadius: 6,
               boxShadow: '0 6px 24px rgba(15,23,42,0.18)',
               padding: 10,
-              maxWidth: 480,
-              minWidth: 320,
+              width: TT_W,
+              maxHeight: window.innerHeight - 16,
+              overflow: 'auto',
               fontSize: '0.72rem',
               color: TEXT_DARK,
-              zIndex: 10,
+              zIndex: 1000,
             }}
           >
             <TooltipBody t={tooltip} />
           </div>
-        )}
-      </div>
+        )
+      })(), document.body)}
 
       {/* Docked horizon strip — only in linked mode */}
       {linkedMode && hasData && (
