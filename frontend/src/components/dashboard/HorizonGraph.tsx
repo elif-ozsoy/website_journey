@@ -1,49 +1,119 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import * as d3 from 'd3'
 import type { AgentStep } from '../agent/agentTypes'
-import type { CompareHighlight } from '../../lib/api'
-import {
-  SAMPLE_COUNT, buildJourneySamples,
-  type JourneySample,
-} from './horizonDensity'
 
 interface Props {
   agentJourneys: AgentStep[][]
   humanJourneys?: AgentStep[][]
   agentLabels?: string[]
   humanLabels?: string[]
-  highlight?: CompareHighlight
 }
 
 const AGENT_COLOR = '#32494B'
 const HUMAN_COLOR = '#881342'
 
+const AGENT_PALETTE = [
+  '#32494B', '#3d5b5d', '#496e70', '#558183', '#619496', '#6da7a9',
+]
+const HUMAN_PALETTE = [
+  '#881342', '#9e1852', '#b41e62', '#ca2472', '#e02a82', '#f63092',
+]
+function colorForJourney(kind: 'agent' | 'human', index: number): string {
+  return (kind === 'agent' ? AGENT_PALETTE : HUMAN_PALETTE)[index % 6]
+}
+
+/* ── Strip constants (for the per-journey detail section) ── */
+const STRIP_HEIGHT  = 44
+const STRIP_LABEL_W = 160
+const STRIP_GAP     = 5
+const NUM_BANDS     = 3
+const SAMPLE_COUNT  = 240
+const KDE_BANDWIDTH = 0.05
+const CLICK_TOL     = 0.05
+
 /* ── Overlay chart constants ── */
 const CHART_PAD = { top: 22, right: 20, bottom: 34, left: 16 }
 const CHART_H   = 190   // total SVG height
 
+const TEXT_DARK  = '#334155'
 const TEXT_MUTED = '#94a3b8'
 const TEXT_LABEL = '#475569'
 const BORDER     = '#e2e8f0'
 
-/* ── Step helpers ──
- * isCountableAction / buildJourneySamples / gaussianKDE / JourneySample live in
- * ./horizonDensity so the linked Flow + Horizon view shares the exact same math. */
+const STEP_ACTION_COLORS: Record<string, string> = {
+  click_element:   '#185FA5',
+  input_text:      '#059669',
+  go_to_url:       '#d97706',
+  scroll:          '#0891b2',
+  go_back:         '#f43f5e',
+  extract_content: '#7c3aed',
+  done:            '#16a34a',
+}
 
-/* Build a raw action-count histogram over `nBins` evenly-spaced time bins.
- * Each bin counts how many countable actions from these journeys fell in it.
- * Returns average counts per journey so the axis is "actions per journey". */
-function avgCountHistogram(journeySteps: AgentStep[][], nBins: number): number[] {
-  if (journeySteps.length === 0) return new Array(nBins).fill(0)
-  const totals = new Array(nBins).fill(0) as number[]
-  for (const steps of journeySteps) {
-    const samples = buildJourneySamples(steps)
-    for (const { relT } of samples) {
-      const bin = Math.min(nBins - 1, Math.floor(relT * nBins))
-      totals[bin]++
-    }
+/* ── Step helpers ── */
+
+function isCountableAction(s: AgentStep): boolean {
+  const a = (s.action_type ?? '').toLowerCase()
+  return !(!a || a === 'unknown' || a === 'wait' || a === 'extract_content')
+}
+
+interface JourneySample {
+  relT: number
+  step: AgentStep
+  stepIdx: number
+}
+
+function buildJourneySamples(steps: AgentStep[]): JourneySample[] {
+  if (steps.length === 0) return []
+  const tsSteps = steps.filter(s => typeof (s as any).timestamp === 'number')
+  let useTs = false, t0 = 0, t1 = 0
+  if (tsSteps.length >= 2) {
+    t0 = (tsSteps[0] as any).timestamp
+    t1 = (tsSteps[tsSteps.length - 1] as any).timestamp
+    if (t1 > t0) useTs = true
   }
-  return totals.map(v => v / journeySteps.length)
+  const out: JourneySample[] = []
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i]
+    if (!isCountableAction(s)) continue
+    let relT = steps.length > 1 ? i / (steps.length - 1) : 0
+    if (useTs && typeof (s as any).timestamp === 'number') {
+      relT = ((s as any).timestamp - t0) / (t1 - t0)
+    }
+    out.push({ relT: Math.max(0, Math.min(1, relT)), step: s, stepIdx: i })
+  }
+  return out
+}
+
+function gaussianKDE(samples: JourneySample[], bw: number, n: number): number[] {
+  const out = new Array(n).fill(0) as number[]
+  if (samples.length === 0) return out
+  const inv2 = 1 / (2 * bw * bw)
+  const norm = 1 / (bw * Math.sqrt(2 * Math.PI))
+  for (let g = 0; g < n; g++) {
+    const t = g / (n - 1)
+    let s = 0
+    for (const p of samples) { const d = t - p.relT; s += norm * Math.exp(-d * d * inv2) }
+    out[g] = s
+  }
+  return out
+}
+
+function shadeHex(hex: string, t: number): string {
+  const m = hex.replace('#', '')
+  const r = parseInt(m.slice(0, 2), 16)
+  const g = parseInt(m.slice(2, 4), 16)
+  const b = parseInt(m.slice(4, 6), 16)
+  const mix = (c: number) => Math.round(c * (1 - t))
+  const h = (c: number) => c.toString(16).padStart(2, '0')
+  return `#${h(mix(r))}${h(mix(g))}${h(mix(b))}`
+}
+
+function averageDensities(densities: number[][]): number[] {
+  if (densities.length === 0) return new Array(SAMPLE_COUNT).fill(0)
+  const sum = new Array(SAMPLE_COUNT).fill(0) as number[]
+  for (const d of densities) for (let i = 0; i < SAMPLE_COUNT; i++) sum[i] += d[i]
+  return sum.map(v => v / densities.length)
 }
 
 interface Journey {
@@ -52,71 +122,66 @@ interface Journey {
   index: number
   label: string
   steps: AgentStep[]
+  color: string
   samples: JourneySample[]
+  density: number[]
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
  *  Overlay density chart — the primary view
  * ────────────────────────────────────────────────────────────────────────── */
 
-const HIST_BINS = SAMPLE_COUNT
-
 function OverlayDensityChart({
-  agentCounts, humanCounts, agentCount, humanCount, width,
+  agentDensity, humanDensity, agentCount, humanCount, width,
 }: {
-  agentCounts: number[]
-  humanCounts: number[]
+  agentDensity: number[]
+  humanDensity: number[]
   agentCount: number
   humanCount: number
   width: number
 }) {
   const [hoverX, setHoverX] = useState<number | null>(null)
 
-  const Y_AXIS_W = 32
-  const chartW = Math.max(80, width - CHART_PAD.left - CHART_PAD.right - Y_AXIS_W)
+  const chartW = Math.max(80, width - CHART_PAD.left - CHART_PAD.right)
   const chartH = CHART_H - CHART_PAD.top - CHART_PAD.bottom
 
-  const hasAgent = agentCounts.some(v => v > 1e-9)
-  const hasHuman = humanCounts.some(v => v > 1e-9)
+  const hasAgent = agentDensity.some(v => v > 1e-9)
+  const hasHuman = humanDensity.some(v => v > 1e-9)
 
-  const rawMax = Math.max(
-    hasAgent ? Math.max(...agentCounts) : 0,
-    hasHuman ? Math.max(...humanCounts) : 0,
-    0,
+  const globalMax = Math.max(
+    hasAgent ? Math.max(...agentDensity) : 0,
+    hasHuman ? Math.max(...humanDensity) : 0,
+    1e-9,
   )
-  /* Normalize so the busiest time slice reads 100%. */
-  const niceMax = rawMax <= 0 ? 1 : rawMax
 
-  const xOf = (i: number) => (i / (HIST_BINS - 1)) * chartW
-  const yOf = (v: number) => chartH - (v / niceMax) * chartH
+  const xOf = (i: number) => (i / (SAMPLE_COUNT - 1)) * chartW
+  const yOf = (v: number) => chartH - (v / globalMax) * chartH
 
-  const makeArea = (counts: number[]) =>
-    (d3.area<number>().x((_, i) => xOf(i)).y0(chartH).y1(v => yOf(v)).curve(d3.curveBasis))(counts) ?? ''
+  const makeArea = (density: number[]) =>
+    (d3.area<number>().x((_, i) => xOf(i)).y0(chartH).y1(v => yOf(v)).curve(d3.curveBasis))(density) ?? ''
 
-  const makeLine = (counts: number[]) =>
-    (d3.line<number>().x((_, i) => xOf(i)).y(v => yOf(v)).curve(d3.curveBasis))(counts) ?? ''
+  const makeLine = (density: number[]) =>
+    (d3.line<number>().x((_, i) => xOf(i)).y(v => yOf(v)).curve(d3.curveBasis))(density) ?? ''
 
   /* Peak positions */
-  const peakOf = (counts: number[]) => {
+  const peakOf = (density: number[]) => {
     let maxV = -Infinity, maxI = 0
-    for (let i = 0; i < counts.length; i++) if (counts[i] > maxV) { maxV = counts[i]; maxI = i }
+    for (let i = 0; i < density.length; i++) if (density[i] > maxV) { maxV = density[i]; maxI = i }
     return maxV > 1e-9 ? xOf(maxI) : null
   }
-  const agentPeakX = hasAgent ? peakOf(agentCounts) : null
-  const humanPeakX = hasHuman ? peakOf(humanCounts) : null
-
-  /* Percentage y-axis ticks (fraction of the busiest slice). */
-  const yTicks = [0, 0.25, 0.5, 0.75, 1]
+  const agentPeakX = hasAgent ? peakOf(agentDensity) : null
+  const humanPeakX = hasHuman ? peakOf(humanDensity) : null
 
   return (
     <div style={{ position: 'relative', flexShrink: 0 }}>
-      {/* Legend */}
+      {/* Legend — positioned over the chart */}
       <div style={{
         position: 'absolute',
         top: CHART_PAD.top + 8,
         right: CHART_PAD.right + 10,
         display: 'flex', gap: 14, alignItems: 'center',
-        pointerEvents: 'none', zIndex: 1,
+        pointerEvents: 'none',
+        zIndex: 1,
       }}>
         {hasAgent && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -137,24 +202,18 @@ function OverlayDensityChart({
       </div>
 
       <svg width={width} height={CHART_H} style={{ display: 'block' }}>
-        <g transform={`translate(${CHART_PAD.left + Y_AXIS_W},${CHART_PAD.top})`}>
+        <g transform={`translate(${CHART_PAD.left},${CHART_PAD.top})`}>
 
           {/* Chart background */}
           <rect x={0} y={0} width={chartW} height={chartH} fill="#f8fafc" rx={4} />
 
-          {/* Y-axis gridlines + tick labels */}
-          {yTicks.map(f => {
-            const py = chartH - f * chartH
-            return (
-              <g key={f}>
-                <line x1={0} x2={chartW} y1={py} y2={py} stroke="#e2e8f0" strokeWidth={1} />
-                <text x={-6} y={py} textAnchor="end" dominantBaseline="middle"
-                  fontSize={9} fill="#94a3b8" fontFamily="Inter, system-ui, sans-serif">
-                  {Math.round(f * 100)}%
-                </text>
-              </g>
-            )
-          })}
+          {/* Horizontal grid */}
+          {[0.33, 0.66, 1].map(p => (
+            <line key={p}
+              x1={0} x2={chartW} y1={chartH * (1 - p)} y2={chartH * (1 - p)}
+              stroke="#e2e8f0" strokeWidth={1}
+            />
+          ))}
 
           {/* Vertical guides */}
           {[0.25, 0.5, 0.75].map(p => (
@@ -167,16 +226,16 @@ function OverlayDensityChart({
           {/* Human area + line */}
           {hasHuman && (
             <>
-              <path d={makeArea(humanCounts)} fill={HUMAN_COLOR} fillOpacity={0.13} />
-              <path d={makeLine(humanCounts)} fill="none" stroke={HUMAN_COLOR} strokeWidth={2.2} strokeOpacity={0.85} />
+              <path d={makeArea(humanDensity)} fill={HUMAN_COLOR} fillOpacity={0.13} />
+              <path d={makeLine(humanDensity)} fill="none" stroke={HUMAN_COLOR} strokeWidth={2.2} strokeOpacity={0.85} />
             </>
           )}
 
           {/* Agent area + line */}
           {hasAgent && (
             <>
-              <path d={makeArea(agentCounts)} fill={AGENT_COLOR} fillOpacity={0.13} />
-              <path d={makeLine(agentCounts)} fill="none" stroke={AGENT_COLOR} strokeWidth={2.2} strokeOpacity={0.85} />
+              <path d={makeArea(agentDensity)} fill={AGENT_COLOR} fillOpacity={0.13} />
+              <path d={makeLine(agentDensity)} fill="none" stroke={AGENT_COLOR} strokeWidth={2.2} strokeOpacity={0.85} />
             </>
           )}
 
@@ -226,14 +285,14 @@ function OverlayDensityChart({
 
           {/* Y-axis label (rotated) */}
           <text
-            transform={`translate(${-Y_AXIS_W + 4},${chartH / 2}) rotate(-90)`}
+            transform={`translate(${-10},${chartH / 2}) rotate(-90)`}
             textAnchor="middle" fontSize={9} fill="#94a3b8"
             fontFamily="Inter, system-ui, sans-serif"
             style={{ textTransform: 'uppercase', letterSpacing: '0.06em' }}>
             Activity
           </text>
 
-          {/* Hover cursor */}
+          {/* Hover cursor line + label */}
           {hoverX !== null && (
             <g pointerEvents="none">
               <line x1={hoverX} x2={hoverX} y1={0} y2={chartH}
@@ -247,7 +306,7 @@ function OverlayDensityChart({
             </g>
           )}
 
-          {/* Mouse tracker */}
+          {/* Mouse tracker (invisible, spans chart area) */}
           <rect x={0} y={0} width={chartW} height={chartH} fill="transparent"
             onMouseMove={e => {
               const rect = e.currentTarget.getBoundingClientRect()
@@ -266,10 +325,12 @@ function OverlayDensityChart({
  * ────────────────────────────────────────────────────────────────────────── */
 
 export default function HorizonGraph({
-  agentJourneys, humanJourneys = [], agentLabels, humanLabels, highlight,
+  agentJourneys, humanJourneys = [], agentLabels, humanLabels,
 }: Props) {
   type KindFilter = 'both' | 'agent' | 'human'
   const [kindFilter, setKindFilter] = useState<KindFilter>('both')
+  const [hoverJourneyId, setHoverJourneyId] = useState<string | null>(null)
+  const [selection, setSelection] = useState<{ journeyId: string; relT: number } | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerW, setContainerW] = useState(800)
@@ -289,7 +350,8 @@ export default function HorizonGraph({
       out.push({
         id: `${kind}-${i}`, kind, index: i,
         label: label ?? (kind === 'agent' ? `AI Run #${i + 1}` : `User #${i + 1}`),
-        steps, samples,
+        steps, color: colorForJourney(kind, i), samples,
+        density: gaussianKDE(samples, KDE_BANDWIDTH, SAMPLE_COUNT),
       })
     }
     agentJourneys.forEach((s, i) => make(s, 'agent', i, agentLabels?.[i]))
@@ -297,18 +359,21 @@ export default function HorizonGraph({
     return out
   }, [agentJourneys, humanJourneys, agentLabels, humanLabels])
 
-  /* Count histograms for overlay chart */
-  const agentCountHist = useMemo(
-    () => avgCountHistogram(
-      (kindFilter === 'human' ? [] : journeys.filter(j => j.kind === 'agent')).map(j => j.steps),
-      HIST_BINS,
+  const visibleJourneys = useMemo(
+    () => journeys.filter(j => kindFilter === 'both' || j.kind === kindFilter),
+    [journeys, kindFilter],
+  )
+
+  /* Averaged densities for the overlay chart */
+  const avgAgentDensity = useMemo(
+    () => averageDensities(
+      (kindFilter === 'human' ? [] : journeys.filter(j => j.kind === 'agent')).map(j => j.density)
     ),
     [journeys, kindFilter],
   )
-  const humanCountHist = useMemo(
-    () => avgCountHistogram(
-      (kindFilter === 'agent' ? [] : journeys.filter(j => j.kind === 'human')).map(j => j.steps),
-      HIST_BINS,
+  const avgHumanDensity = useMemo(
+    () => averageDensities(
+      (kindFilter === 'agent' ? [] : journeys.filter(j => j.kind === 'human')).map(j => j.density)
     ),
     [journeys, kindFilter],
   )
@@ -316,11 +381,17 @@ export default function HorizonGraph({
   const agentCount = journeys.filter(j => j.kind === 'agent').length
   const humanCount = journeys.filter(j => j.kind === 'human').length
 
-  const chartSvgW = Math.max(200, containerW - 40)
-  const hasData = journeys.length > 0
+  /* Scale for strips */
+  const globalMax = useMemo(() => {
+    let m = 0
+    for (const j of visibleJourneys) for (const v of j.density) if (v > m) m = v
+    return Math.max(1e-9, m)
+  }, [visibleJourneys])
+  const bandSize = globalMax / NUM_BANDS
 
-  const focusKind: 'agent' | 'human' | null =
-    highlight?.side === 'ai' ? 'agent' : highlight?.side === 'human' ? 'human' : null
+  const chartSvgW = Math.max(200, containerW - 40)
+  const stripW = Math.max(160, containerW - STRIP_LABEL_W - 32)
+  const hasData = journeys.length > 0
 
   return (
     <div ref={containerRef} style={{
@@ -335,23 +406,11 @@ export default function HorizonGraph({
         flexShrink: 0, flexWrap: 'wrap', gap: 8, marginBottom: 12,
       }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>
-              Activity over journey time
-            </div>
-            {focusKind && (
-              <span style={{
-                fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
-                background: focusKind === 'agent' ? `${AGENT_COLOR}18` : `${HUMAN_COLOR}18`,
-                color: focusKind === 'agent' ? AGENT_COLOR : HUMAN_COLOR,
-                border: `1px solid ${focusKind === 'agent' ? AGENT_COLOR : HUMAN_COLOR}`,
-              }}>
-                {focusKind === 'agent' ? 'AI journeys highlighted' : 'Human journeys highlighted'}
-              </span>
-            )}
+          <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>
+            Activity density over journey time
           </div>
           <div style={{ fontSize: '0.7rem', color: TEXT_MUTED, marginTop: 2 }}>
-            Share of activity across journey time (relative to the busiest slice)
+            Average action density across all journeys · click a strip below to inspect steps
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
@@ -372,11 +431,11 @@ export default function HorizonGraph({
         </div>
       </div>
 
-      {/* ── Overlay chart ── */}
+      {/* ── Overlay density chart ── */}
       {hasData ? (
         <OverlayDensityChart
-          agentCounts={agentCountHist}
-          humanCounts={humanCountHist}
+          agentDensity={avgAgentDensity}
+          humanDensity={avgHumanDensity}
           agentCount={agentCount}
           humanCount={humanCount}
           width={chartSvgW}
@@ -390,7 +449,139 @@ export default function HorizonGraph({
           Run an agent or record a human session to see the activity chart.
         </div>
       )}
+
+
+      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 }}>
+        {visibleJourneys.length === 0 ? (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            height: 80, color: TEXT_MUTED, fontSize: '0.78rem',
+          }}>
+            {journeys.length === 0 ? 'No journeys yet.' : 'No journeys match the current filter.'}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Detail modal */}
+      {selection && (() => {
+        const j = visibleJourneys.find(x => x.id === selection.journeyId)
+        if (!j) return null
+        const stepsNear = j.samples.filter(s => Math.abs(s.relT - selection.relT) <= CLICK_TOL).map(s => s.step)
+        const fromPct = Math.max(0, Math.round((selection.relT - CLICK_TOL) * 100))
+        const toPct   = Math.min(100, Math.round((selection.relT + CLICK_TOL) * 100))
+        return (
+          <BucketDetailModal
+            journey={j} fromPct={fromPct} toPct={toPct}
+            atPct={Math.round(selection.relT * 100)} steps={stepsNear}
+            onClose={() => setSelection(null)}
+          />
+        )
+      })()}
     </div>
   )
 }
 
+
+function CursorLine({ stripW }: { stripW: number }) {
+  const [x, setX] = useState<number | null>(null)
+  return (
+    <g>
+      <rect x={0} y={0} width={stripW} height={STRIP_HEIGHT} fill="transparent"
+        onMouseMove={e => setX(e.clientX - e.currentTarget.getBoundingClientRect().left)}
+        onMouseLeave={() => setX(null)} />
+      {x !== null && (
+        <line x1={x} x2={x} y1={0} y2={STRIP_HEIGHT}
+          stroke="#1e293b" strokeWidth={1} strokeOpacity={0.18} pointerEvents="none" />
+      )}
+    </g>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ *  Detail modal
+ * ────────────────────────────────────────────────────────────────────────── */
+
+function BucketDetailModal({
+  journey, fromPct, toPct, atPct, steps, onClose,
+}: {
+  journey: Journey; fromPct: number; toPct: number; atPct: number; steps: AgentStep[]; onClose: () => void
+}) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(15,23,42,0.5)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: 8, boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+        width: 'min(720px, 96vw)', maxHeight: '85vh',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        fontFamily: 'Inter, system-ui, sans-serif',
+      }}>
+        <div style={{
+          padding: '14px 18px', borderBottom: `1px solid ${BORDER}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+            <span style={{ width: 12, height: 12, borderRadius: '50%', background: journey.color, flexShrink: 0 }} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 700, color: TEXT_DARK, fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {journey.label}
+              </div>
+              <div style={{ fontSize: '0.72rem', color: TEXT_MUTED, marginTop: 2 }}>
+                around {atPct}% ({fromPct}–{toPct}%) · {steps.length} action{steps.length !== 1 ? 's' : ''}
+              </div>
+            </div>
+          </div>
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none', color: TEXT_LABEL, fontSize: '1.2rem',
+            cursor: 'pointer', padding: '0 4px', lineHeight: 1,
+          }} title="Close (Esc)">✕</button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {steps.length === 0 ? (
+            <div style={{ padding: 24, fontSize: '0.85rem', color: TEXT_MUTED, fontStyle: 'italic', textAlign: 'center' }}>
+              No actions in this slice.
+            </div>
+          ) : steps.map((s, i) => {
+            const at = s.action_type ?? 'step'
+            const ac = STEP_ACTION_COLORS[at] ?? '#475569'
+            let path = s.url
+            try { path = new URL(s.url).pathname || '/' } catch { /* keep */ }
+            const det = (s as any).action_details ?? {}
+            const detailStr = typeof det === 'object' && det !== null
+              ? (det.text ?? det.value ?? det.url ?? det.element_text ?? '') : ''
+            return (
+              <div key={i} style={{
+                padding: '10px 18px', borderBottom: '1px solid #f1f5f9',
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+              }}>
+                <span style={{
+                  fontSize: '0.66rem', fontWeight: 700, color: ac, background: `${ac}18`,
+                  padding: '2px 6px', borderRadius: 3, textTransform: 'uppercase',
+                  letterSpacing: '0.02em', flexShrink: 0, minWidth: 84, textAlign: 'center',
+                }}>{at.replace(/_/g, ' ')}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '0.78rem', color: TEXT_DARK, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {path}
+                  </div>
+                  {detailStr && (
+                    <div style={{ fontSize: '0.72rem', color: TEXT_MUTED, marginTop: 2, lineHeight: 1.4 }}>
+                      {String(detailStr).slice(0, 120)}{String(detailStr).length > 120 ? '…' : ''}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
