@@ -458,6 +458,20 @@ export default function ActionPointsList({
       <div style={{ padding: '8px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--gray50)', flexWrap: 'wrap' }}>
         <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)', flexShrink: 0 }}>Action Points</span>
 
+        <button
+          onClick={onRerunAnalysis}
+          disabled={compareLoading}
+          title="Re-run the comparative analysis from scratch (regenerates all action points and diagram links)"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0,
+            padding: '3px 10px', borderRadius: 99, border: '1px solid var(--border)',
+            background: 'var(--surface)', color: 'var(--brand)', fontSize: 'var(--fs-small)',
+            fontWeight: 700, cursor: compareLoading ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {compareLoading ? <><Spinner size={9} /> Re-running…</> : '↻ Re-run analysis'}
+        </button>
+
         {openCount === 0 && points.length > 0 && <span style={{ fontSize: 'var(--fs-small)', color: 'var(--accent)', fontWeight: 600, flexShrink: 0 }}>all resolved ✓</span>}
         {pendingAnnotations > 0 && allShots.length > 0 && (
           <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', color: 'var(--gray400)', flexShrink: 0 }}>
