@@ -70,3 +70,9 @@ export function gaussianKDE(samples: JourneySample[], bw: number, n: number): nu
 export function densityForSteps(steps: AgentStep[]): number[] {
   return gaussianKDE(buildJourneySamples(steps), KDE_BANDWIDTH, SAMPLE_COUNT)
 }
+
+/* Relative-time (0..1) position of every countable action in a journey. Used
+ * to build a raw action-count histogram over time. */
+export function actionRelTimes(steps: AgentStep[]): number[] {
+  return buildJourneySamples(steps).map(s => s.relT)
+}
