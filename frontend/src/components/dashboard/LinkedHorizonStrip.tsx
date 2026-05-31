@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import * as d3 from 'd3'
 import type { ActionSample } from './horizonDensity'
 
@@ -60,6 +61,10 @@ function shortenLabel(s: string, maxLen = 12): string {
 
 export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX }: Props) {
   const [localX, setLocalX] = useState<number | null>(null)
+  /* Screen-space rect of the SVG, so the action popover can be portalled ABOVE
+   * the strip (over the flow diagram) and never cover the curve. */
+  const [svgRect, setSvgRect] = useState<{ left: number; top: number } | null>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
 
   const chartH = STRIP_TOTAL_H - PAD.top - PAD.bottom
 
@@ -125,20 +130,29 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
 
   /* Pixel x of the cursor within the wrapping div (svg coords + marginLeft). */
   const cursorPx = clampedX !== null ? marginLeft + clampedX : null
-  /* Clamp the popover horizontally so it never overflows the strip. */
-  const popoverLeft = cursorPx !== null
-    ? Math.max(4, Math.min(width - POPOVER_W - 4, cursorPx - POPOVER_W / 2))
+
+  /* Anchor the popover in screen coordinates so it can be portalled to <body>
+   * and float ABOVE the strip — keeping the curve fully visible. Falls back to
+   * the live SVG rect when the cursor is driven by the Sankey hover above. */
+  const anchor = svgRect ?? (svgRef.current
+    ? (() => { const r = svgRef.current!.getBoundingClientRect(); return { left: r.left, top: r.top } })()
+    : null)
+  const popoverScreenLeft = anchor && cursorPx !== null
+    ? Math.max(8, Math.min(window.innerWidth - POPOVER_W - 8, anchor.left + cursorPx - POPOVER_W / 2))
     : 0
+  const showPopover = !!active && cursorPx !== null && actionsAtCursor.length > 0 && !!anchor
 
   return (
     <div style={{ flexShrink: 0, borderTop: '1px solid #e2e8f0', background: '#fff', position: 'relative' }}>
       {/* Action popover — lists the actions in the time-bin under the cursor,
-       *  mirroring the standalone Horizon Graph's slice detail. */}
-      {active && cursorPx !== null && actionsAtCursor.length > 0 && (
+       *  mirroring the standalone Horizon Graph's slice detail. Portalled to
+       *  <body> and floated above the strip so it never covers the curve. */}
+      {showPopover && createPortal(
         <div style={{
-          position: 'absolute', left: popoverLeft, top: 6, width: POPOVER_W,
+          position: 'fixed', left: popoverScreenLeft, top: anchor!.top - 10,
+          transform: 'translateY(-100%)', width: POPOVER_W,
           background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6,
-          boxShadow: '0 8px 28px rgba(15,23,42,0.18)', zIndex: 20,
+          boxShadow: '0 8px 28px rgba(15,23,42,0.22)', zIndex: 1000,
           fontFamily: 'Inter, system-ui, sans-serif', overflow: 'hidden',
           pointerEvents: 'none',
         }}>
@@ -148,7 +162,7 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
             display: 'flex', justifyContent: 'space-between', gap: 8,
           }}>
             <span>{actionsAtCursor.length} action{actionsAtCursor.length === 1 ? '' : 's'} @ {pctAtCursor}%</span>
-            <span style={{ color: TEXT_MUTED, fontWeight: 500 }}>{active.label}</span>
+            <span style={{ color: TEXT_MUTED, fontWeight: 500 }}>{active!.label}</span>
           </div>
           <div style={{ maxHeight: 150, overflowY: 'auto' }}>
             {actionsAtCursor.slice(0, 6).map((a, i) => {
@@ -182,15 +196,17 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
-      <svg width={width} height={STRIP_TOTAL_H} style={{ display: 'block' }}
+      <svg ref={svgRef} width={width} height={STRIP_TOTAL_H} style={{ display: 'block' }}
         onMouseMove={e => {
           const rect = e.currentTarget.getBoundingClientRect()
           setLocalX(e.clientX - rect.left - marginLeft)
+          setSvgRect({ left: rect.left, top: rect.top })
         }}
-        onMouseLeave={() => setLocalX(null)}
+        onMouseLeave={() => { setLocalX(null); setSvgRect(null) }}
       >
         <g transform={`translate(${marginLeft},${PAD.top})`}>
 
