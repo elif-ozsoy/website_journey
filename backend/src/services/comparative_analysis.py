@@ -333,24 +333,75 @@ def _post_process(result: dict) -> dict:
     return result
 
 
+# Keywords that hint which diagram best evidences an action point.
+_FLOW_KEYWORDS = (
+    "navigat", "detour", "wrong turn", "dead end", "path", "route", "menu",
+    "page", "link", "click through", "back", "backtrack", "flow", "step",
+    "lost", "found", "reach", "fail", "drop", "bounce", "structure",
+)
+_HORIZON_KEYWORDS = (
+    "time", "timing", "pacing", "rhythm", "front-load", "frontload", "back-load",
+    "burst", "idle", "rush", "gradual", "slow", "fast", "duration", "spike",
+    "concentrat", "explore", "scroll", "hesitat", "delay", "early", "late",
+)
+_ACTION_TYPE_HINTS = {
+    "click_element": ("click", "button", "press", "tap"),
+    "scroll": ("scroll",),
+    "input_text": ("type", "typed", "input", "enter text", "form field"),
+    "navigate": ("navigat", "url", "page load", "redirect"),
+}
+
+
 def _ensure_diagram(item: dict) -> None:
     """Guarantee every action point links to at least one diagram so the UI
     always shows a "Verify in diagrams" link. Models (especially the fallback
-    providers) frequently omit the optional diagrams array; we fall back to the
-    "compare" view, whose side we derive from the point type."""
+    providers) frequently omit the optional diagrams array; we pick the most
+    relevant view (flow / horizon / compare) from the point's wording and the
+    point type, with a proper highlight so the relevant parts light up just
+    like the Human-vs-AI view."""
     diagrams = item.get("diagrams")
     if isinstance(diagrams, list) and len(diagrams) > 0:
         return
     point_type = item.get("type")
     side = "ai" if point_type == "agent_gap" else "human" if point_type == "human_issue" else "both"
-    item["diagrams"] = [
-        {
+    text = (item.get("text") or "").lower()
+
+    flow_score = sum(1 for kw in _FLOW_KEYWORDS if kw in text)
+    horizon_score = sum(1 for kw in _HORIZON_KEYWORDS if kw in text)
+
+    if horizon_score > flow_score and horizon_score > 0:
+        action_types = [at for at, hints in _ACTION_TYPE_HINTS.items() if any(h in text for h in hints)]
+        highlight = {"side": side}
+        if action_types:
+            highlight["action_types"] = action_types[:2]
+        item["diagrams"] = [{
+            "view": "horizon",
+            "reason": "Compare when in the journey AI and human activity is concentrated.",
+            "highlight": highlight,
+            "diagram_explanation": (
+                "The activity-density curves show how AI and human pacing differ over the "
+                "course of the task — look at where each curve peaks to see the evidence "
+                "behind this action point."
+            ),
+        }]
+    elif flow_score > 0:
+        item["diagrams"] = [{
+            "view": "sankey",
+            "reason": "Trace where AI and human journeys diverge through the navigation flow.",
+            "highlight": {"side": side},
+            "diagram_explanation": (
+                "The journey-flow diagram shows how AI and human journeys move through the "
+                "navigation milestones — follow the highlighted side to see the detours or "
+                "dead ends behind this action point."
+            ),
+        }]
+    else:
+        item["diagrams"] = [{
             "view": "compare",
             "reason": "Compare AI vs human effort and action mix for this task.",
             "highlight": {"side": side, "sections": ["stats", "steps_per_page"]},
             "diagram_explanation": (
-                "Review the AI-vs-human step counts and per-page effort to see "
-                "the evidence behind this action point."
+                "Review the AI-vs-human step counts and per-page effort to see the evidence "
+                "behind this action point."
             ),
-        }
-    ]
+        }]
