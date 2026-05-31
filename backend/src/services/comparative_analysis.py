@@ -110,12 +110,8 @@ Guidelines:
   * "sankey" — journey milestone flow diagram showing how AI and human journeys progress through navigation stages (start → page load → nav click → detail/done/failed). Link width = steps spent in that transition. For sankey you MUST include a "highlight" object with "side": "ai" when the evidence is about agent journeys, "side": "human" when about human journeys, or "side": "both" when both are relevant. Best for: wrong turns, detours, dead ends, which journeys reached their goal vs. failed, divergent navigation paths between agent and human.
   * "horizon" — activity-density curve chart; x-axis = relative journey time (0–100%), y-axis = how concentrated activity (clicks, scrolls, inputs, navigation) is at that moment. AI and human journeys are each drawn as an averaged density curve overlaid on the same time axis, with peak markers. For horizon you MUST include a "highlight" object. Set "side": "ai" when the evidence is about agent timing/rhythm (dims the human curve and emphasises the AI curve), "side": "human" when about human timing, or "side": "both" when comparing both. You MAY also add "action_types" (array of "click_element", "input_text", "scroll", "navigate", "extract_content", "other") to overlay an amber band showing WHEN those specific action types are concentrated in the timeline. Best for: comparing WHEN in the journey activity is concentrated, front/back-loaded task patterns, agents that front-load navigation while humans explore gradually, temporal differences in exploration rhythm between AI and human sessions, or pinpointing when a specific action type (e.g. lots of scrolling, repeated clicks) spikes during the journey.
   * "heatmap" — screenshot overlays with click density (red = many clicks, blue = few). Best for: missed click targets, wrong elements clicked, interaction patterns on a specific page, invisible or hard-to-find UI elements.
-  * "multiflow" — every journey rendered in parallel swim lanes so you can see all runs at once. Best for: outlier runs, sessions that took a completely different path, spotting the one user who succeeded differently.
-  * "similarity" — matrix of similarity scores between each AI run and each human session (0–1). Best for: how well-calibrated the agent is overall, whether one agent run was an outlier, whether human sessions cluster differently from agent sessions.
-  * "comparative" — AI-generated written report covering pain points, differences, and recommendations across all journeys. Best for: pointing to a specific finding in the written analysis that directly names this issue.
-  * "insights" — aggregated metrics: session counts, average steps, drop-off rates, time-on-page per step. Best for: quantifying drop-off at a specific page, confirming that a step takes disproportionately long, validating step-count claims with hard numbers.
-  * "human_agg" — Sankey diagram of aggregated human navigation paths, sized by session count and coloured by frequency (green = common, red = rare). Best for: showing which paths real users actually take, identifying where users drop off or bounce, highlighting the dominant navigation flow vs. detours.
-  * "policy" — AI agent re-run guided by the human-aggregate behavioural policy; shows how injecting real user context changes the agent's decisions. Best for: demonstrating whether the agent's deviations from human paths are correctable, validating that a navigation issue exists even with policy guidance.
+
+  IMPORTANT: "compare", "sankey", "horizon", and "heatmap" are the ONLY valid values for "view". Do NOT use any other value (no "insights", "comparative", "multiflow", "similarity", "human_agg", or "policy") — those do not exist as linkable diagrams and will produce a broken link.
 - The platform goal is agent calibration: helping UX designers replace human testers with AI agents. Your analysis must distinguish between (a) genuine website UX problems and (b) agent calibration gaps where the agent simply behaves differently from humans.
 - For `type` on each pain_point and recommendation: use "ux_issue" if both agent and human struggle, "agent_gap" if the agent deviates from human behaviour (calibration problem), "human_issue" if humans struggle but the agent does not.
 - For agent_bullets: describe what the agent did DIFFERENTLY from the human (the deviation). Exactly 3 strings, ≤12 words each. MUST include at least one of: "step N", "/url-path", or UI element name in quotes. Do NOT write "The agent..." — state the observation directly.
@@ -125,7 +121,7 @@ Guidelines:
   Bad: ["The agent had difficulty finding contact information", "Navigation was confusing", "Human users also struggled"]
 - Leave agent_explanation and human_explanation as empty strings "".
 - For calibration_summary: if similarity scores are available, state the score and interpret it (e.g. "Agent similarity 0.42 — low calibration, agent took a markedly different path than humans"). If no scores, derive qualitatively from step sequences. Flag tasks where agent path diverges markedly as calibration priorities.
-- For diagrams: select at most 2 per point — one for agent evidence, one for human evidence if genuinely different. Match the diagram to the KIND of evidence: when the issue is about WHERE in the navigation flow journeys go (wrong turns, detours, dead ends, reaching/failing the goal), use "sankey". When the issue is about WHEN in the journey activity happens or its rhythm/pacing (front-loading, bursts of a specific action type, long idle phases, agent rushing vs. human exploring gradually), use "horizon" — this is the preferred diagram for any timing/intensity/pacing observation, and add "action_types" to it when a specific action type drives the issue. For "agent_gap" points use side "ai", for "human_issue" use side "human", for "ux_issue" use side "both" or "heatmap". Use "policy" when you want to show whether the issue is correctable by injecting human context into the agent. Always include at least 1 diagram per point — if only 1 diagram genuinely shows the evidence, use exactly 1. Never leave the array empty.
+- For diagrams: the ONLY valid "view" values are "compare", "sankey", "horizon", and "heatmap". Never emit any other value (no "insights", "comparative", "multiflow", "similarity", "human_agg", "policy"). Select 1–2 per point — one for agent evidence, one for human evidence if genuinely different. Match the diagram to the KIND of evidence: when the issue is about WHERE in the navigation flow journeys go (wrong turns, detours, dead ends, reaching/failing the goal), use "sankey". When the issue is about WHEN in the journey activity happens or its rhythm/pacing (front-loading, bursts of a specific action type, long idle phases, agent rushing vs. human exploring gradually), use "horizon" — this is the REQUIRED diagram for any timing/intensity/pacing observation, and add "action_types" to it when a specific action type drives the issue. Actively look for at least one timing/pacing observation per task so "horizon" is used. For effort/efficiency/action-mix differences use "compare". For missed or wrong click targets on a specific page use "heatmap". For "agent_gap" points use side "ai", for "human_issue" use side "human", for "ux_issue" use side "both". Always include at least 1 diagram per point — if only 1 genuinely shows the evidence, use exactly 1. Never leave the array empty.
 """
 
 
@@ -333,6 +329,9 @@ def _post_process(result: dict) -> dict:
     return result
 
 
+# The only diagram views that resolve to a real, highlightable dashboard view.
+_VALID_DIAGRAM_VIEWS = {"compare", "sankey", "horizon", "heatmap"}
+
 # Keywords that hint which diagram best evidences an action point.
 _FLOW_KEYWORDS = (
     "navigat", "detour", "wrong turn", "dead end", "path", "route", "menu",
@@ -359,9 +358,13 @@ def _ensure_diagram(item: dict) -> None:
     relevant view (flow / horizon / compare) from the point's wording and the
     point type, with a proper highlight so the relevant parts light up just
     like the Human-vs-AI view."""
+    # Drop any diagram referencing a view we can't actually link to / highlight.
     diagrams = item.get("diagrams")
-    if isinstance(diagrams, list) and len(diagrams) > 0:
-        return
+    if isinstance(diagrams, list):
+        valid = [d for d in diagrams if isinstance(d, dict) and d.get("view") in _VALID_DIAGRAM_VIEWS]
+        item["diagrams"] = valid
+        if len(valid) > 0:
+            return
     point_type = item.get("type")
     side = "ai" if point_type == "agent_gap" else "human" if point_type == "human_issue" else "both"
     text = (item.get("text") or "").lower()
