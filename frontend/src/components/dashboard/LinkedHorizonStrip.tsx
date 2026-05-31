@@ -5,30 +5,35 @@ import { SAMPLE_COUNT } from './horizonDensity'
 /* ────────────────────────────────────────────────────────────────────────────
  *  LinkedHorizonStrip
  *
- *  A horizon (activity-density) strip docked directly beneath the Flow diagram.
- *  It shares the Sankey's horizontal coordinate system: `marginLeft` matches the
- *  Sankey's left margin and `width` matches the Sankey SVG width, so the strip's
- *  time axis lines up pixel-for-pixel with the hovered/pinned journey's path.
+ *  A horizon (activity-density) strip docked beneath the Flow diagram.
+ *  It shares the Sankey's horizontal coordinate system so the time axis lines
+ *  up pixel-for-pixel with the hovered/pinned journey's flow above.
  *
- *  When a journey is active, its density curve is drawn across exactly the
- *  pixel span [xStart, xEnd] that the journey occupies in the Sankey above.
- *  A synced vertical cursor (driven by the Sankey hover, or by hovering the
- *  strip itself) reports the activity percentage at that point in time.
+ *  Two issues addressed compared to the initial version:
+ *
+ *  1. Y-axis  — gridlines + rotated "Activity" label + tick values.
+ *
+ *  2. Milestone markers  — The density curve is mapped linearly (step 0..N maps
+ *     to relative time 0..1) but Sankey nodes are placed by milestone depth, not
+ *     elapsed time.  To make the strip readable we draw a thin labelled vertical
+ *     at each milestone's column x-position so the reader can see exactly which
+ *     part of the timeline corresponds to each page transition.
  * ────────────────────────────────────────────────────────────────────────── */
 
-const STRIP_TOTAL_H = 132
-const PAD = { top: 26, bottom: 30 }
+const STRIP_TOTAL_H = 148
+const PAD = { top: 28, bottom: 32, left: 36 }   // left pad accommodates y-axis
 const TEXT_MUTED = '#94a3b8'
+const GRID_COLOR = '#e8edf2'
 
 export interface ActiveJourney {
   journeyId: string
   label: string
   color: string
-  /* Pixel span (in Sankey inner coords) the journey occupies. */
   xStart: number
   xEnd: number
-  /* Activity density curve, SAMPLE_COUNT samples across relative time 0..1. */
   density: number[]
+  /* Ordered milestone positions (Sankey inner coords) for the journey. */
+  milestones: Array<{ x: number; label: string }>
   pinned: boolean
 }
 
@@ -36,12 +41,16 @@ interface Props {
   width: number
   marginLeft: number
   active: ActiveJourney | null
-  /* Cursor X in Sankey inner coords (mouse position on the hovered flow). */
   cursorX: number | null
 }
 
+/* Shorten a milestone label so it fits under the marker without overlap. */
+function shortenLabel(s: string, maxLen = 12): string {
+  if (s.length <= maxLen) return s
+  return s.slice(0, maxLen - 1) + '…'
+}
+
 export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX }: Props) {
-  /* Local hover lets the user scrub the strip directly to read activity %. */
   const [localX, setLocalX] = useState<number | null>(null)
 
   const chartH = STRIP_TOTAL_H - PAD.top - PAD.bottom
@@ -56,13 +65,11 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
       .x((_, i) => xOf(i)).y0(chartH).y1(v => yOf(v)).curve(d3.curveBasis))(active.density) ?? ''
     const line = (d3.line<number>()
       .x((_, i) => xOf(i)).y(v => yOf(v)).curve(d3.curveBasis))(active.density) ?? ''
-    /* Peak time. */
     let peakI = 0, peakV = -Infinity
     active.density.forEach((v, i) => { if (v > peakV) { peakV = v; peakI = i } })
-    return { span, area, line, peakX: peakV > 1e-9 ? xOf(peakI) : null }
+    return { span, maxV, area, line, peakX: peakV > 1e-9 ? xOf(peakI) : null }
   }, [active, chartH])
 
-  /* Which cursor wins: a local scrub overrides the Sankey-driven one. */
   const effectiveX = localX ?? cursorX
   const clampedX = active && effectiveX !== null
     ? Math.max(active.xStart, Math.min(active.xEnd, effectiveX))
@@ -70,6 +77,27 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
   const pctAtCursor = active && clampedX !== null && geom
     ? Math.round(((clampedX - active.xStart) / geom.span) * 100)
     : null
+
+  /* Activity value at cursor, normalised 0..100 */
+  const activityAtCursor = active && clampedX !== null && geom
+    ? (() => {
+        const relT = (clampedX - active.xStart) / geom.span
+        const idx = Math.round(relT * (SAMPLE_COUNT - 1))
+        const clamped = Math.max(0, Math.min(SAMPLE_COUNT - 1, idx))
+        return Math.round((active.density[clamped] / geom.maxV) * 100)
+      })()
+    : null
+
+  /* De-duplicate milestone markers that are too close together (<8 px) to
+   * avoid label collisions. Keep the first occurrence of each x bucket. */
+  const dedupedMilestones = useMemo(() => {
+    if (!active) return []
+    const result: Array<{ x: number; label: string }> = []
+    for (const m of active.milestones) {
+      if (!result.some(r => Math.abs(r.x - m.x) < 8)) result.push(m)
+    }
+    return result
+  }, [active])
 
   return (
     <div style={{ flexShrink: 0, borderTop: '1px solid #e2e8f0', background: '#fff' }}>
@@ -81,8 +109,9 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
         onMouseLeave={() => setLocalX(null)}
       >
         <g transform={`translate(${marginLeft},${PAD.top})`}>
+
           {/* Section title */}
-          <text x={0} y={-12} fontSize={11} fontWeight={700} fill="#64748b"
+          <text x={0} y={-14} fontSize={11} fontWeight={700} fill="#64748b"
             fontFamily="Inter, system-ui, sans-serif"
             style={{ textTransform: 'uppercase', letterSpacing: '0.06em' } as any}>
             Activity over time
@@ -95,63 +124,102 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
             </text>
           ) : (
             <>
-              {/* Strip background, aligned to the journey's span in the Sankey */}
+              {/* ── Strip background ────────────────────────────────────── */}
               <rect x={active.xStart} y={0} width={geom!.span} height={chartH}
-                fill="#f8fafc" rx={4} />
+                fill="#f8fafc" rx={3} />
 
-              {/* Connector bracket tying the strip to the flow above */}
+              {/* ── Y-axis: gridlines + label ────────────────────────────
+               *  Three horizontal bands: 0 (baseline), 50%, 100% of max.
+               *  Label "Activity" runs vertically to the left of the strip. */}
+              {[0, 0.5, 1].map(p => (
+                <line key={p}
+                  x1={active.xStart} x2={active.xEnd}
+                  y1={chartH * (1 - p)} y2={chartH * (1 - p)}
+                  stroke={p === 0 ? '#cbd5e1' : GRID_COLOR}
+                  strokeWidth={p === 0 ? 1 : 1}
+                  strokeDasharray={p === 0 ? undefined : '3,3'}
+                />
+              ))}
+              {/* Y-axis tick labels at left edge of strip */}
+              {[0, 0.5, 1].map(p => (
+                <text key={p}
+                  x={active.xStart - 5}
+                  y={chartH * (1 - p) + (p === 0 ? 0 : 4)}
+                  textAnchor="end" fontSize={8} fill={TEXT_MUTED}
+                  fontFamily="Inter, system-ui, sans-serif">
+                  {p === 0 ? '' : p === 0.5 ? '50%' : '100%'}
+                </text>
+              ))}
+              {/* Rotated "Activity" label */}
+              <text
+                transform={`translate(${active.xStart - 20},${chartH / 2}) rotate(-90)`}
+                textAnchor="middle" fontSize={8} fill={TEXT_MUTED}
+                fontFamily="Inter, system-ui, sans-serif"
+                style={{ textTransform: 'uppercase', letterSpacing: '0.05em' } as any}>
+                Activity
+              </text>
+
+              {/* ── Connector bracket ────────────────────────────────────── */}
               <path
-                d={`M${active.xStart},-4 L${active.xStart},2 M${active.xEnd},-4 L${active.xEnd},2`}
+                d={`M${active.xStart},-5 L${active.xStart},2 M${active.xEnd},-5 L${active.xEnd},2`}
                 stroke={active.color} strokeWidth={1.5} strokeOpacity={0.5} fill="none" />
-              <line x1={active.xStart} x2={active.xEnd} y1={-4} y2={-4}
+              <line x1={active.xStart} x2={active.xEnd} y1={-5} y2={-5}
                 stroke={active.color} strokeWidth={1.5} strokeOpacity={0.5} />
 
-              {/* Density area + line */}
+              {/* ── Density area + line ──────────────────────────────────── */}
               <path d={geom!.area} fill={active.color} fillOpacity={0.16} />
               <path d={geom!.line} fill="none" stroke={active.color} strokeWidth={2.2} strokeOpacity={0.9} />
 
-              {/* Peak marker */}
+              {/* ── Peak marker ──────────────────────────────────────────── */}
               {geom!.peakX !== null && (
-                <g transform={`translate(${geom!.peakX},0)`}>
+                <g transform={`translate(${geom!.peakX},0)`} pointerEvents="none">
                   <line y1={0} y2={chartH} stroke={active.color} strokeWidth={1}
                     strokeOpacity={0.3} strokeDasharray="2,2" />
-                  <text y={-6} textAnchor="middle" fontSize={9} fill={active.color}
+                  <text y={-7} textAnchor="middle" fontSize={9} fill={active.color}
                     fontFamily="Inter, system-ui, sans-serif" fontWeight={700}>peak</text>
                 </g>
               )}
 
-              {/* Baseline */}
-              <line x1={active.xStart} x2={active.xEnd} y1={chartH} y2={chartH}
-                stroke="#cbd5e1" strokeWidth={1} />
+              {/* ── Milestone markers ────────────────────────────────────────
+               *  Each marker is a thin vertical at a Sankey node's column
+               *  x-center, with the milestone name below the baseline.
+               *  This lets the reader relate the density shape to the actual
+               *  page transitions — and explains low-activity gaps. */}
+              {dedupedMilestones.map((m, i) => (
+                <g key={i} transform={`translate(${m.x},0)`} pointerEvents="none">
+                  <line y1={0} y2={chartH}
+                    stroke="#94a3b8" strokeWidth={1} strokeOpacity={0.35} strokeDasharray="2,3" />
+                  {/* Small dot on baseline */}
+                  <circle cx={0} cy={chartH} r={2.5} fill="#94a3b8" fillOpacity={0.6} />
+                  {/* Label below baseline */}
+                  <text y={chartH + 12} textAnchor="middle" fontSize={8} fill="#64748b"
+                    fontFamily="Inter, system-ui, sans-serif">
+                    {shortenLabel(m.label)}
+                  </text>
+                </g>
+              ))}
 
-              {/* Time axis labels (start / mid / end) */}
-              {[0, 0.5, 1].map(p => {
-                const x = active.xStart + p * geom!.span
-                return (
-                  <g key={p} transform={`translate(${x},${chartH})`}>
-                    <line y1={0} y2={4} stroke="#94a3b8" strokeWidth={1} />
-                    <text y={15} textAnchor={p === 0 ? 'start' : p === 1 ? 'end' : 'middle'}
-                      fontSize={9} fill="#94a3b8" fontFamily="Inter, system-ui, sans-serif">
-                      {p === 0 ? 'start' : p === 1 ? 'end' : `${Math.round(p * 100)}%`}
-                    </text>
-                  </g>
-                )
-              })}
-
-              {/* Synced cursor */}
+              {/* ── Synced cursor ────────────────────────────────────────── */}
               {clampedX !== null && (
                 <g pointerEvents="none">
                   <line x1={clampedX} x2={clampedX} y1={0} y2={chartH}
-                    stroke="#1e293b" strokeWidth={1} strokeOpacity={0.35} />
-                  <rect x={clampedX - 17} y={chartH + 4} width={34} height={14} rx={2}
-                    fill="#1e293b" fillOpacity={0.8} />
-                  <text x={clampedX} y={chartH + 14} textAnchor="middle" fontSize={9} fill="#fff"
-                    fontFamily="Inter, system-ui, sans-serif">{pctAtCursor}%</text>
+                    stroke="#1e293b" strokeWidth={1} strokeOpacity={0.4} />
+                  {/* Tooltip bubble: shows journey progress % + activity % */}
+                  <rect x={clampedX - 20} y={chartH + 2} width={40} height={26} rx={3}
+                    fill="#1e293b" fillOpacity={0.85} />
+                  <text x={clampedX} y={chartH + 12} textAnchor="middle" fontSize={8.5} fill="#fff"
+                    fontFamily="Inter, system-ui, sans-serif" fontWeight={600}>
+                    {pctAtCursor}% time
+                  </text>
+                  <text x={clampedX} y={chartH + 23} textAnchor="middle" fontSize={8} fill="#cbd5e1"
+                    fontFamily="Inter, system-ui, sans-serif">
+                    {activityAtCursor}% act.
+                  </text>
                 </g>
               )}
 
-              {/* Pinned badge */}
-              <text x={geom!.span + active.xStart} y={-12} textAnchor="end"
+              {/* ── Journey label / pinned badge ─────────────────────────── */}
+              <text x={active.xEnd} y={-14} textAnchor="end"
                 fontSize={10} fontWeight={700} fill={active.color}
                 fontFamily="Inter, system-ui, sans-serif">
                 {active.label}{active.pinned ? ' · pinned' : ''}

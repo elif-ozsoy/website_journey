@@ -941,11 +941,14 @@ export default function SankeyDiagram({
    * pinnedJourneyId  — journey kept active after the mouse leaves (click to pin)
    * cursorX          — mouse x in Sankey inner coords, for the synced cursor
    * svgW             — current SVG width, so the strip matches it exactly
-   * journeyExtents   — per-journey [xStart, xEnd] pixel span (Sankey inner coords) */
+   * journeyExtents   — per-journey [xStart, xEnd] pixel span (Sankey inner coords)
+   * journeyMilestones — ordered milestone x-centers for each journey, used by the strip
+   *                     to draw reference lines aligned to the Sankey columns above */
   const [pinnedJourneyId, setPinnedJourneyId] = useState<string | null>(null)
   const [cursorX, setCursorX] = useState<number | null>(null)
   const [svgW, setSvgW] = useState(860)
   const [journeyExtents, setJourneyExtents] = useState<Map<string, { xStart: number; xEnd: number }>>(new Map())
+  const [journeyMilestones, setJourneyMilestones] = useState<Map<string, Array<{ x: number; label: string }>>>(new Map())
   /* Modal: when set, shows a full step-by-step view of this journey. */
   const [modalJourneyId, setModalJourneyId] = useState<string | null>(null)
 
@@ -1029,14 +1032,29 @@ export default function SankeyDiagram({
      * inner-coordinate system as `g`) so its time axis aligns with the flow. */
     if (linkedMode) {
       const extents = new Map<string, { xStart: number; xEnd: number }>()
+      /* Per-journey: collect (stepIdx, nodeXCenter, nodeName) so we can sort
+       * by visit order and derive ordered milestone positions for the strip. */
+      const milestonesByJourney = new Map<string, Array<{ stepIdx: number; x: number; label: string }>>()
       for (const n of laidOut.nodes as any[]) {
+        const xCenter = (n.x0 + n.x1) / 2
         for (const v of (n.visits ?? [])) {
           const cur = extents.get(v.journeyId)
           if (!cur) extents.set(v.journeyId, { xStart: n.x0, xEnd: n.x1 })
           else { cur.xStart = Math.min(cur.xStart, n.x0); cur.xEnd = Math.max(cur.xEnd, n.x1) }
+          const arr = milestonesByJourney.get(v.journeyId) ?? []
+          arr.push({ stepIdx: v.stepIdx, x: xCenter, label: n.name })
+          milestonesByJourney.set(v.journeyId, arr)
         }
       }
+      /* Sort each journey's milestones by step order so they appear left→right
+       * in the same order the journey actually progressed. */
+      const milestones = new Map<string, Array<{ x: number; label: string }>>()
+      for (const [jId, pts] of milestonesByJourney) {
+        pts.sort((a, b) => a.stepIdx - b.stepIdx)
+        milestones.set(jId, pts.map(p => ({ x: p.x, label: p.label })))
+      }
       setJourneyExtents(extents)
+      setJourneyMilestones(milestones)
       setSvgW(W)
     }
 
@@ -1297,9 +1315,10 @@ export default function SankeyDiagram({
       xStart: ext.xStart,
       xEnd: ext.xEnd,
       density: densityForSteps(meta.steps),
+      milestones: journeyMilestones.get(id) ?? [],
       pinned: pinnedJourneyId === id,
     }
-  }, [linkedMode, hoverJourneyId, pinnedJourneyId, journeyMap, journeyExtents])
+  }, [linkedMode, hoverJourneyId, pinnedJourneyId, journeyMap, journeyExtents, journeyMilestones])
 
   return (
     <div style={{
