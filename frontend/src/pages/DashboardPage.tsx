@@ -315,6 +315,23 @@ export default function DashboardPage() {
   const [overviewSplitPct, setOverviewSplitPct] = useState(80)
   const overviewContainerRef = useRef<HTMLDivElement>(null)
 
+  const [rightPanelW, setRightPanelW] = useState(320)
+  const rightPanelContainerRef = useRef<HTMLDivElement>(null)
+
+  function startRightPanelDrag(e: React.MouseEvent) {
+    e.preventDefault()
+    const container = rightPanelContainerRef.current
+    if (!container) return
+    const onMove = (mv: MouseEvent) => {
+      const rect = container.getBoundingClientRect()
+      const w = Math.min(600, Math.max(180, rect.right - mv.clientX))
+      setRightPanelW(w)
+    }
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   function startOverviewDrag(e: React.MouseEvent) {
     e.preventDefault()
     const container = overviewContainerRef.current
@@ -825,7 +842,7 @@ useEffect(() => {
         )}
 
         {activeView === 'flow_sankey' && (
-          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+          <div ref={rightPanelContainerRef} style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
             {/* ── Sankey diagram (left) ── */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
               {agentJourneySteps.length === 0 && humanJourneySteps.length === 0 ? (
@@ -851,8 +868,15 @@ useEffect(() => {
                 />
               )}
             </div>
+            {/* Draggable divider */}
+            <div
+              onMouseDown={startRightPanelDrag}
+              style={{ width: 5, flexShrink: 0, cursor: 'col-resize', background: 'var(--border)', transition: 'background 0.15s' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'var(--border)')}
+            />
             {/* ── Insights panel (right) ── */}
-            <div style={{ width: 320, flexShrink: 0, borderLeft: '1px solid var(--border)', overflowY: 'auto', background: 'var(--surface)' }}>
+            <div style={{ width: rightPanelW, flexShrink: 0, borderLeft: 'none', overflowY: 'auto', background: 'var(--surface)' }}>
               <SankeyInsightsPanel
                 compareAnalysis={compareAnalysis}
                 compareLoading={compareLoading}
@@ -868,7 +892,7 @@ useEffect(() => {
 
         {/* ── FLOW + HORIZON (linked) ── */}
         {activeView === 'linked_flow' && (
-          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+          <div ref={rightPanelContainerRef} style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
             {/* ── Linked flow diagram + horizon strip (left) ── */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
               {agentJourneySteps.length === 0 && humanJourneySteps.length === 0 ? (
@@ -895,8 +919,15 @@ useEffect(() => {
                 />
               )}
             </div>
+            {/* Draggable divider */}
+            <div
+              onMouseDown={startRightPanelDrag}
+              style={{ width: 5, flexShrink: 0, cursor: 'col-resize', background: 'var(--border)', transition: 'background 0.15s' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'var(--border)')}
+            />
             {/* ── Insights panel (right) ── */}
-            <div style={{ width: 320, flexShrink: 0, borderLeft: '1px solid var(--border)', overflowY: 'auto', background: 'var(--surface)' }}>
+            <div style={{ width: rightPanelW, flexShrink: 0, borderLeft: 'none', overflowY: 'auto', background: 'var(--surface)' }}>
               <SankeyInsightsPanel
                 compareAnalysis={compareAnalysis}
                 compareLoading={compareLoading}
@@ -1010,7 +1041,7 @@ useEffect(() => {
         )}
 
         {activeView === 'horizon_graph' && (
-          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+          <div ref={rightPanelContainerRef} style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
             {/* ── Horizon graph (left) ── */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
               {agentJourneySteps.length === 0 && humanJourneySteps.length === 0 ? (
@@ -1035,8 +1066,15 @@ useEffect(() => {
                 />
               )}
             </div>
+            {/* Draggable divider */}
+            <div
+              onMouseDown={startRightPanelDrag}
+              style={{ width: 5, flexShrink: 0, cursor: 'col-resize', background: 'var(--border)', transition: 'background 0.15s' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'var(--border)')}
+            />
             {/* ── Insights panel (right) ── */}
-            <div style={{ width: 320, flexShrink: 0, borderLeft: '1px solid var(--border)', overflowY: 'auto', background: 'var(--surface)' }}>
+            <div style={{ width: rightPanelW, flexShrink: 0, borderLeft: 'none', overflowY: 'auto', background: 'var(--surface)' }}>
               <HorizonInsightsPanel
                 compareAnalysis={compareAnalysis}
                 compareLoading={compareLoading}
