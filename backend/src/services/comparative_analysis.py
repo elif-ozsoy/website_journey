@@ -327,6 +327,7 @@ def _post_process(result: dict) -> dict:
             task[key] = cleaned
 
         _ensure_task_has_flow(task)
+        _ensure_task_has_horizon(task)
 
     return result
 
@@ -369,6 +370,46 @@ def _ensure_task_has_flow(task: dict) -> None:
             "The journey-flow diagram shows how AI and human journeys move through the "
             "navigation milestones — the highlighted divergence points mark where the paths "
             "split, which is the evidence behind this action point."
+        ),
+    })
+
+
+def _ensure_task_has_horizon(task: dict) -> None:
+    """Guarantee at least one action point per task links to the Horizon Graph.
+    Mirrors _ensure_task_has_flow but for timing/pacing insights."""
+    points = [
+        p for key in ("pain_points", "recommendations")
+        for p in task.get(key, [])
+        if isinstance(p, dict)
+    ]
+    if not points:
+        return
+    if any(_has_view(p, "horizon") for p in points):
+        return
+
+    def _horizon_score(p: dict) -> int:
+        text = (p.get("text") or "").lower()
+        return sum(1 for kw in _HORIZON_KEYWORDS if kw in text)
+
+    target = max(points, key=_horizon_score)
+    point_type = target.get("type")
+    side = "ai" if point_type == "agent_gap" else "human" if point_type == "human_issue" else "both"
+    action_types: list[str] = []
+    text_lower = (target.get("text") or "").lower()
+    for at, hints in _ACTION_TYPE_HINTS.items():
+        if any(h in text_lower for h in hints):
+            action_types.append(at)
+    target.setdefault("diagrams", [])
+    target["diagrams"].append({
+        "view": "horizon",
+        "reason": "See how AI and human action timing and pacing differ across the journey.",
+        "highlight": {
+            "side": side,
+            **({"action_types": action_types} if action_types else {}),
+        },
+        "diagram_explanation": (
+            "The horizon graph shows the density and rhythm of actions over time — "
+            "the highlighted side reveals where timing and pacing diverge between AI and human."
         ),
     })
 

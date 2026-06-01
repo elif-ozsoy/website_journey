@@ -266,6 +266,7 @@ export default function DashboardPage() {
 
 
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigatingViaLinkRef = useRef(false)
   const urlView = searchParams.get('view') ?? 'overview'
   const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'human_vs_ai', 'time_event', 'horizon_graph', 'linked_flow'] as ActiveView[]).includes(urlView as ActiveView)    ? (urlView as ActiveView)
     : 'overview'
@@ -273,7 +274,15 @@ export default function DashboardPage() {
   // Only expose context when the user is on the view it was set for (must be after activeView)
   const activeCompareContext = compareContext?.targetView === activeView ? compareContext : null
 
-
+  // Clear highlight when navigating directly (sidebar/URL) rather than via an action-point link
+  useEffect(() => {
+    if (navigatingViaLinkRef.current) {
+      navigatingViaLinkRef.current = false
+    } else {
+      setCompareContext(null)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView])
 
   const DIAGRAM_VIEW_MAP: Partial<Record<string, ActiveView>> = {
     compare: 'human_vs_ai',
@@ -289,7 +298,8 @@ export default function DashboardPage() {
     policy: 'aggregate',
   }
 
-  function setActiveView(view: ActiveView) {
+  function setActiveView(view: ActiveView, clearContext = false) {
+    if (clearContext) setCompareContext(null)
     setSearchParams((prev: URLSearchParams) => {
       const p = new URLSearchParams(prev)
       p.set('view', view)
@@ -303,6 +313,7 @@ export default function DashboardPage() {
     // Set context BEFORE changing view so that if setSearchParams triggers a
     // render before setCompareContext is batched, the context is already ready
     // when the diagram view mounts.
+    navigatingViaLinkRef.current = true
     if (HIGHLIGHT_VIEWS.includes(target) && diagramRef) {
       setCompareContext({ highlight: diagramRef.highlight, note, explanation: diagramRef.diagram_explanation, targetView: target })
     } else {
