@@ -265,9 +265,14 @@ def comparative_analysis(
     # Only include human Journey rows that haven't already been added above
     human_journey_ids = {j.id for j in db_journeys if j.is_agent is False}
 
-    # Build a fallback task title from site tasks (first task title, or generic)
+    # Human tracker sessions are not tied to a specific task (the tracking
+    # script doesn't capture which task the visitor was doing), so attribute
+    # each human session to EVERY task being analysed. This mirrors the
+    # dashboard graphs, which show human journeys against all tasks, and avoids
+    # the LLM reporting "no human data" / "N/A" for tasks other than the first.
     site_tasks = db.query(TaskModel).filter(TaskModel.site_id == site_id).all()
-    default_task_title = site_tasks[0].title if site_tasks else "General navigation"
+    agent_task_titles = [t for t in {j.task_title for j in db_journeys if j.is_agent is not False} if t]
+    human_task_titles: list[str] = agent_task_titles or [t.title for t in site_tasks] or ["General navigation"]
 
     sessions = (
         db.query(TrackerSession)
@@ -310,11 +315,13 @@ def comparative_analysis(
                 "timestamp": e.timestamp,
             })
 
-        journey_dicts.append({
-            "task_title": default_task_title,
-            "is_agent": False,
-            "steps": steps,
-        })
+        # Attribute this human session to every analysed task.
+        for title in human_task_titles:
+            journey_dicts.append({
+                "task_title": title,
+                "is_agent": False,
+                "steps": steps,
+            })
 
     if not journey_dicts:
         raise HTTPException(status_code=404, detail="No journeys found for this site")
