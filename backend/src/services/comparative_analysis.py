@@ -326,7 +326,51 @@ def _post_process(result: dict) -> dict:
                 cleaned.append(item)
             task[key] = cleaned
 
+        _ensure_task_has_flow(task)
+
     return result
+
+
+def _has_view(item: dict, view: str) -> bool:
+    return any(
+        isinstance(d, dict) and d.get("view") == view
+        for d in (item.get("diagrams") or [])
+    )
+
+
+def _ensure_task_has_flow(task: dict) -> None:
+    """Guarantee at least one action point per task links to the Journey Flow
+    (sankey) diagram. Weak fallback models often pick only compare/horizon, so
+    we inject a sankey link into the most navigation-related point if missing."""
+    points = [
+        p for key in ("pain_points", "recommendations")
+        for p in task.get(key, [])
+        if isinstance(p, dict)
+    ]
+    if not points:
+        return
+    if any(_has_view(p, "sankey") for p in points):
+        return
+
+    def _flow_score(p: dict) -> int:
+        text = (p.get("text") or "").lower()
+        return sum(1 for kw in _FLOW_KEYWORDS if kw in text)
+
+    # Prefer the point whose wording is most about navigation; fall back to first.
+    target = max(points, key=_flow_score)
+    point_type = target.get("type")
+    side = "ai" if point_type == "agent_gap" else "human" if point_type == "human_issue" else "both"
+    target.setdefault("diagrams", [])
+    target["diagrams"].append({
+        "view": "sankey",
+        "reason": "Trace where AI and human journeys diverge through the navigation flow.",
+        "highlight": {"side": side, "focus": "divergence"},
+        "diagram_explanation": (
+            "The journey-flow diagram shows how AI and human journeys move through the "
+            "navigation milestones — the highlighted divergence points mark where the paths "
+            "split, which is the evidence behind this action point."
+        ),
+    })
 
 
 # The only diagram views that resolve to a real, highlightable dashboard view.
