@@ -307,7 +307,12 @@ def _post_process(result: dict) -> dict:
     def _norm(text: str) -> str:
         return re.sub(r"\W+", " ", text.lower().strip())[:80]
 
+    if not isinstance(result, dict):
+        return result
+
     for task in result.get("task_analyses", []):
+        if not isinstance(task, dict):
+            continue
         for key in ("pain_points", "recommendations"):
             items = task.get(key, [])
             seen: set[str] = set()
