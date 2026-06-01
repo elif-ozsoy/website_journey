@@ -105,7 +105,7 @@ def _build_llm(llm_provider: str, api_key: str, model: str | None):
 
     if llm_provider == "nvidia":
         return ChatOpenAI(
-            model=model or "mistralai/mistral-large-3-675b-instruct-2512", #"qwen/qwen3.5-122b-a10b", #"meta/llama-3.2-11b-vision-instruct", "meta/llama-4-maverick-17b-128e-instruct"
+            model=model or "meta/llama-4-maverick-17b-128e-instruct",
             api_key=api_key,
             base_url="https://integrate.api.nvidia.com/v1",
             timeout=120,
@@ -116,7 +116,7 @@ def _build_llm(llm_provider: str, api_key: str, model: str | None):
         ChatGoogle = getattr(browser_use_mod, "ChatGoogle")
 
         return ChatGoogle(
-            model=model or "gemini-3-flash-preview",
+            model=model or "gemini-2.0-flash",
             api_key=api_key,
         )
 
@@ -263,7 +263,7 @@ async def run_browser_agent(
         use_vision=True,
         use_judge=False,
         max_history_items=10,
-        max_failures=3,
+        max_failures=5,
         llm_timeout=120,
         max_actions_per_step=1,
         save_conversation_path=save_conversation_path,
