@@ -285,6 +285,9 @@ export interface CompareHighlight {
   metrics?: Array<'median_steps' | 'unique_pages' | 'click_rate' | 'scroll_rate' | 'avg_duration' | 'total_steps' | 'avg_steps' | 'shared_pages'>
   action_types?: Array<'click_element' | 'input_text' | 'scroll' | 'navigate' | 'extract_content' | 'other'>
   pages?: string[]
+  /** When 'divergence', the Journey Flow diagram emphasises the milestone nodes
+   *  where AI and human (or different runs) took divergent paths. */
+  focus?: 'divergence'
 }
 
 export interface DiagramRef {

@@ -570,18 +570,9 @@ useEffect(() => {
 
   const visibleSessionCount = sessionFilter === null ? sessions.length : sessionFilter.size
 
-  const autoRunVersionRef = useRef<string | null>(null)
-  useEffect(() => {
-    // DEBUG: cache disabled — always re-run
-    // if (autoRunVersionRef.current === activeVersionId) return
-    if (compareLoading || compareAnalysis) return
-    if (agentJourneyCount === 0 && humanJourneyCount === 0) return
-    // const cached = localStorage.getItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId))
-    // if (cached) return
-    autoRunVersionRef.current = activeVersionId
-    handleRunComparative()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeVersionId, compareLoading, compareAnalysis, agentJourneyCount, humanJourneyCount])
+  // Analysis is generated ONLY when the user explicitly clicks "Run Analysis" /
+  // "Re-run analysis". On mount we just load any stored result (effect above);
+  // we never auto-run on page refresh or when returning to the dashboard.
 
   async function handleRunComparative() {
     if (compareLoading) return

@@ -1229,17 +1229,31 @@ export default function SankeyDiagram({
     /* Apply highlight-based dimming as part of the initial render so that
      * resizes (which re-run this effect) always restore the correct state.
      * The hover effect below temporarily overrides this during mouse interaction. */
-    const focusKindInit = highlight?.side === 'ai' ? 'agent' : highlight?.side === 'human' ? 'human' : null
-    if (focusKindInit) {
+    if (highlight?.focus === 'divergence' && divergentNodeIds.size > 0) {
       g.selectAll('path').attr('opacity', function (d: any) {
-        const meta = journeyMap.get((d as LinkDatum).journeyId)
-        return meta?.kind === focusKindInit ? NORMAL_OPACITY : DIM_OPACITY
+        const link = d as any
+        const srcId = typeof link.source === 'object' ? link.source.id : null
+        const tgtId = typeof link.target === 'object' ? link.target.id : null
+        const touches = (srcId && divergentNodeIds.has(srcId)) || (tgtId && divergentNodeIds.has(tgtId))
+        return touches ? HIGHLIGHT_OPACITY : DIM_OPACITY
       })
-      g.selectAll('rect').attr('opacity', function (d: any) {
-        const node = d as NodeDatum
-        const hasKind = node.visits?.some(v => journeyMap.get(v.journeyId)?.kind === focusKindInit)
-        return hasKind ? 1 : DIM_OPACITY
-      })
+      g.selectAll('rect')
+        .attr('opacity', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? 1 : DIM_OPACITY))
+        .attr('stroke', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? '#f59e0b' : 'none'))
+        .attr('stroke-width', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? 3 : 0))
+    } else {
+      const focusKindInit = highlight?.side === 'ai' ? 'agent' : highlight?.side === 'human' ? 'human' : null
+      if (focusKindInit) {
+        g.selectAll('path').attr('opacity', function (d: any) {
+          const meta = journeyMap.get((d as LinkDatum).journeyId)
+          return meta?.kind === focusKindInit ? NORMAL_OPACITY : DIM_OPACITY
+        })
+        g.selectAll('rect').attr('opacity', function (d: any) {
+          const node = d as NodeDatum
+          const hasKind = node.visits?.some(v => journeyMap.get(v.journeyId)?.kind === focusKindInit)
+          return hasKind ? 1 : DIM_OPACITY
+        })
+      }
     }
   }, [graph, journeyMap, journeys.length, hasData, nodeColor, divergentNodeIds, resizeTick, highlight, linkedMode])
 
@@ -1262,6 +1276,25 @@ export default function SankeyDiagram({
       return
     }
 
+    // Divergence focus: emphasise the milestone nodes where journeys split,
+    // and the flows passing through them. Works even with one-sided data.
+    if (highlight?.focus === 'divergence' && divergentNodeIds.size > 0) {
+      svg.selectAll<SVGPathElement, LinkDatum>('path').attr('opacity', function (d: any) {
+        const link = d as any
+        const srcId = typeof link.source === 'object' ? link.source.id : null
+        const tgtId = typeof link.target === 'object' ? link.target.id : null
+        const touches = (srcId && divergentNodeIds.has(srcId)) || (tgtId && divergentNodeIds.has(tgtId))
+        return touches ? HIGHLIGHT_OPACITY : DIM_OPACITY
+      })
+      svg.selectAll<SVGRectElement, NodeDatum>('rect')
+        .attr('opacity', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? 1 : DIM_OPACITY))
+        .attr('stroke', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? '#f59e0b' : 'none'))
+        .attr('stroke-width', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? 3 : 0))
+      return
+    }
+    // Not in divergence mode — clear any divergence outline.
+    svg.selectAll('rect').attr('stroke', 'none').attr('stroke-width', 0)
+
     const focusKind = highlight?.side === 'ai' ? 'agent' : highlight?.side === 'human' ? 'human' : null
 
     if (focusKind) {
@@ -1279,7 +1312,7 @@ export default function SankeyDiagram({
 
     svg.selectAll('path').attr('opacity', NORMAL_OPACITY)
     svg.selectAll('rect').attr('opacity', 1)
-  }, [hoverJourneyId, pinnedJourneyId, highlight, journeyMap, hasData])
+  }, [hoverJourneyId, pinnedJourneyId, highlight, journeyMap, hasData, divergentNodeIds])
 
   const onLegendClick = useCallback((id: string) => {
     setHiddenJourneyIds(prev => {
@@ -1339,6 +1372,14 @@ export default function SankeyDiagram({
                 border: `1px solid ${highlight.side === 'ai' ? AGENT_COLOR : HUMAN_COLOR}`,
               }}>
                 {highlight.side === 'ai' ? 'AI journeys highlighted' : 'Human journeys highlighted'}
+              </span>
+            )}
+            {highlight?.focus === 'divergence' && divergentNodeIds.size > 0 && (
+              <span style={{
+                fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+                background: '#fef3c7', color: '#b45309', border: '1px solid #f59e0b',
+              }}>
+                ⚡ Divergence points highlighted
               </span>
             )}
           </div>
