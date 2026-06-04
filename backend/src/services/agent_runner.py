@@ -256,6 +256,8 @@ async def run_browser_agent(
         ],
         window_size={'width': 1280, 'height': 800},
         device_scale_factor=1.0,
+        default_navigation_timeout=30000,
+        default_timeout=30000,
     )
 
     # Create a new folder to save conversation logs (based on timestamp)
