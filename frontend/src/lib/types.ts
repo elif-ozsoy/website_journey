@@ -66,9 +66,9 @@ export interface Agent {
 }
 
 export const DEFAULT_AGENTS: Agent[] = [
-  { id: 'navigator', name: 'Navigator', model: 'meta/llama-4-maverick-17b-128e-instruct', selected: false, prompt: 'Calm and direct. Follows the clearest path.' },
-  { id: 'skeptic', name: 'Skeptic', model: 'meta/llama-4-maverick-17b-128e-instruct', selected: false, prompt: 'Careful and exact. Looks for unclear labels.' },
-  { id: 'first-time-user', name: 'First-time User', model: 'meta/llama-4-maverick-17b-128e-instruct', selected: false, prompt: 'Simple and cautious. Explores like a new visitor.' },
+  { id: 'navigator', name: 'Navigator', model: '', selected: false, prompt: 'Calm and direct. Follows the clearest path.' },
+  { id: 'skeptic', name: 'Skeptic', model: '', selected: false, prompt: 'Careful and exact. Looks for unclear labels.' },
+  { id: 'first-time-user', name: 'First-time User', model: '', selected: false, prompt: 'Simple and cautious. Explores like a new visitor.' },
 ]
 
 export interface ModelOption {
