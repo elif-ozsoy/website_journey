@@ -115,7 +115,7 @@ export default function HeatmapInsightsPanel({
       if (task.difficulty === 'low') continue
       if (activeTaskTitle && task.task_title !== activeTaskTitle) continue
       const severity: 'high' | 'medium' = task.difficulty === 'high' ? 'high' : 'medium'
-      for (const raw of [...task.pain_points, ...task.recommendations]) {
+      for (const raw of [...(task.pain_points ?? []), ...(task.recommendations ?? [])]) {
         const item = raw as ActionPointItem
         const heatmapRef = item.diagrams?.find(d => d.view === 'heatmap')
         if (!heatmapRef) continue

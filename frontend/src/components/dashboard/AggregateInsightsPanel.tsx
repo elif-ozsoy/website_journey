@@ -90,7 +90,7 @@ export default function AggregateInsightsPanel({
     for (const task of compareAnalysis.task_analyses) {
       if (task.difficulty === 'low') continue
       const severity: 'high' | 'medium' = task.difficulty === 'high' ? 'high' : 'medium'
-      for (const raw of [...task.pain_points, ...task.recommendations]) {
+      for (const raw of [...(task.pain_points ?? []), ...(task.recommendations ?? [])]) {
         const item = raw as ActionPointItem
         // Only include items classified by the model (typed) — exclude untyped entries
         if (!item.type) continue

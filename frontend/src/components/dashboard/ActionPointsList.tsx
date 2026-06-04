@@ -58,16 +58,18 @@ function derivePoints(analysis: ComparativeAnalysis): Omit<ActionPoint, 'status'
     const diff = task.difficulty as 'high' | 'medium' | 'low'
     const severity: 'high' | 'medium' = diff === 'high' ? 'high' : 'medium'
     let hasPainPoints = false
-    for (let i = 0; i < task.pain_points.length; i++) {
-      const item = toItem(task.pain_points[i] as ActionPointItem | string)
+    const painPoints = task.pain_points ?? []
+    for (let i = 0; i < painPoints.length; i++) {
+      const item = toItem(painPoints[i] as ActionPointItem | string)
       if (!item.text.trim()) continue
       pts.push({ id: `pp_${task.task_title}_${i}`, item, type: 'pain_point', task, severity, ppIndex: i })
       hasPainPoints = true
     }
     // Fall back to recommendations when a task has no pain points
     if (!hasPainPoints) {
-      for (let i = 0; i < task.recommendations.length; i++) {
-        const item = toItem(task.recommendations[i] as ActionPointItem | string)
+      const recommendations = task.recommendations ?? []
+      for (let i = 0; i < recommendations.length; i++) {
+        const item = toItem(recommendations[i] as ActionPointItem | string)
         if (!item.text.trim()) continue
         pts.push({ id: `rec_${task.task_title}_${i}`, item, type: 'recommendation', task, severity, ppIndex: i })
       }

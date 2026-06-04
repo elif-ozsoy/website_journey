@@ -106,7 +106,7 @@ export default function HorizonInsightsPanel({
     for (const task of compareAnalysis.task_analyses) {
       if (task.difficulty === 'low') continue
       const severity: 'high' | 'medium' = task.difficulty === 'high' ? 'high' : 'medium'
-      for (const raw of [...task.pain_points, ...task.recommendations]) {
+      for (const raw of [...(task.pain_points ?? []), ...(task.recommendations ?? [])]) {
         const item = raw as ActionPointItem
         // Show points that explicitly reference the horizon diagram, OR that
         // are agent_gap / human_issue — timing differences between AI and human
