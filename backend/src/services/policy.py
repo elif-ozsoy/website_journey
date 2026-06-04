@@ -86,17 +86,21 @@ def build_ai_policy(site_id: str, db: Session, task_id: int | None = None) -> di
     return result
 
 
-def build_policy(site_id: str, db: Session, task_id: int | None = None) -> dict:
+def build_policy(site_id: str, db: Session, task_id: int | None = None, before_timestamp: str | None = None) -> dict:
+    params: dict = {"site_id": site_id}
+    extra = " AND timestamp < :before_timestamp" if before_timestamp else ""
+    if before_timestamp:
+        params["before_timestamp"] = before_timestamp
     rows = db.execute(
         text(
-            """
+            f"""
             SELECT session_id, type, timestamp, path, data
             FROM events
-            WHERE site_id = :site_id
+            WHERE site_id = :site_id{extra}
             ORDER BY session_id, timestamp
             """
         ),
-        {"site_id": site_id},
+        params,
     ).fetchall()
 
     sessions: dict[str, list[dict]] = defaultdict(list)
@@ -331,6 +335,30 @@ def _aggregate(decisions: list[dict]) -> dict:
         "avg_lcp_ms": round(sum(lcp_values) / len(lcp_values)) if lcp_values else None,
         "sequence_patterns": _extract_sequence_patterns(raw_sequences, n),
     }
+
+
+# ── Policy snapshot persistence ───────────────────────────────────────────────
+
+def save_policy_snapshot(site_id: str, policy: dict, db: Session) -> None:
+    """Persist *policy* as the latest snapshot on the site row."""
+    from models.site import Site as SiteModel
+    site = db.get(SiteModel, site_id)
+    if site is None:
+        return
+    site.policy_snapshot = json.dumps(policy)
+    db.commit()
+
+
+def load_policy_snapshot(site_id: str, db: Session) -> dict:
+    """Return the last saved policy snapshot for *site_id*, or {} if none."""
+    from models.site import Site as SiteModel
+    site = db.get(SiteModel, site_id)
+    if site is None or not site.policy_snapshot:
+        return {}
+    try:
+        return json.loads(site.policy_snapshot)
+    except Exception:
+        return {}
 
 
 # ── Policy lookup & prompt injection ──────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import type { ComparativeAnalysis, ActionPointItem } from '../../lib/api'
 
 interface HeatmapActionPoint {
@@ -84,34 +84,53 @@ function ColorSwatch({ color, label, sub }: { color: string; label: string; sub?
 export default function HeatmapInsightsPanel({
   compareAnalysis,
   compareLoading,
+  highlightText,
+  onClearHighlight,
+  activeTaskTitle,
 }: {
   compareAnalysis: ComparativeAnalysis | null
   compareLoading: boolean
+  highlightText?: string | null
+  onClearHighlight?: () => void
+  activeTaskTitle?: string | null
 }) {
   const [activeTab, setActiveTab] = useState<'guide' | 'insights'>('insights')
+  const highlightRef = useRef<HTMLDivElement>(null)
 
-  // Collect ALL action points from the analysis (not filtered by diagram view)
+  useEffect(() => {
+    if (highlightText) setActiveTab('insights')
+  }, [highlightText])
+
+  useEffect(() => {
+    if (highlightText && highlightRef.current) {
+      highlightRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [highlightText])
+
+  // Collect heatmap-specific action points, filtered to the active task
   const allPoints = useMemo<HeatmapActionPoint[]>(() => {
     if (!compareAnalysis) return []
     const pts: HeatmapActionPoint[] = []
     for (const task of compareAnalysis.task_analyses) {
       if (task.difficulty === 'low') continue
+      if (activeTaskTitle && task.task_title !== activeTaskTitle) continue
       const severity: 'high' | 'medium' = task.difficulty === 'high' ? 'high' : 'medium'
       for (const raw of [...task.pain_points, ...task.recommendations]) {
         const item = raw as ActionPointItem
         const heatmapRef = item.diagrams?.find(d => d.view === 'heatmap')
+        if (!heatmapRef) continue
         pts.push({
           id: `${task.task_title}::${item.text.slice(0, 40)}`,
           text: item.text,
           type: item.type,
           taskTitle: task.task_title,
           severity,
-          heatmapReason: heatmapRef?.reason,
+          heatmapReason: heatmapRef.reason,
         })
       }
     }
     return pts
-  }, [compareAnalysis])
+  }, [compareAnalysis, activeTaskTitle])
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -208,7 +227,7 @@ export default function HeatmapInsightsPanel({
           {!compareLoading && allPoints.length === 0 && (
             <div style={{ padding: '14px 16px', fontSize: 'var(--fs-small)', color: 'var(--gray400)', lineHeight: 1.6 }}>
               {compareAnalysis
-                ? 'No action points found in the analysis.'
+                ? 'No heatmap action points for this task.'
                 : 'Run the comparative analysis from the Overview tab to see action points here.'}
             </div>
           )}
@@ -216,8 +235,33 @@ export default function HeatmapInsightsPanel({
           {/* Action point cards */}
           {allPoints.map((pt, i) => {
             const badge = pt.type ? BADGE_MAP[pt.type] : null
+            const isHighlighted = !!(highlightText && pt.text === highlightText)
             return (
-              <div key={pt.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--gray100)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div
+                key={pt.id}
+                ref={isHighlighted ? highlightRef : undefined}
+                style={{
+                  padding: '12px 16px', borderBottom: '1px solid var(--gray100)',
+                  display: 'flex', flexDirection: 'column', gap: 6,
+                  background: isHighlighted ? '#fffbeb' : undefined,
+                  outline: isHighlighted ? '2px solid #f59e0b' : undefined,
+                  outlineOffset: isHighlighted ? '-2px' : undefined,
+                  borderRadius: isHighlighted ? 4 : undefined,
+                  transition: 'background 0.3s, outline 0.3s',
+                }}
+              >
+                {/* From Overview banner */}
+                {isHighlighted && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#d97706', background: '#fef3c7', padding: '2px 7px', borderRadius: 99 }}>
+                      ↩ From Overview
+                    </span>
+                    <button
+                      onClick={onClearHighlight}
+                      style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--gray400)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', lineHeight: 1 }}
+                    >✕</button>
+                  </div>
+                )}
                 {/* Severity + task */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{

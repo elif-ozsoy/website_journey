@@ -1,0 +1,114 @@
+% ====================== SETTINGS FILE — CipherCorgi Poster v2 ===========================
+\documentclass[portrait,a0,posterdraft]{a0poster} % posterdraft -> final for A0
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{epsf,pstricks}
+\usepackage{amsmath,amsfonts,amssymb}
+\usepackage{graphicx}
+\usepackage{xcolor}
+
+%%% page margins
+\usepackage[includeheadfoot,
+            top=2.2cm, bottom=2cm,
+            left=2.2cm, right=4cm,
+            headsep=0mm, footskip=1mm]{geometry}
+
+%%% ETH Textstyle
+\usepackage{lmodern}
+\usepackage[scaled=.95]{helvet}
+\usepackage[helvet]{sfmath}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{microtype}
+
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric,arrows,positioning,calc,arrows.meta}
+
+% ====  ETH colors  ===
+\definecolor{ETH1}{RGB}{31,64,122}
+\definecolor{ETH6}{RGB}{111,111,100}
+\definecolor{ETH8}{RGB}{0,122,150}
+\definecolor{ETHBlue}{RGB}{33,92,175}
+\definecolor{verylightgray}{rgb}{0.94,0.94,0.94}
+
+% ====  Webapp palette  ===
+\definecolor{CCblue}{RGB}{24,95,165}       % #185FA5
+\definecolor{CCbluehov}{RGB}{19,74,130}    % #134A82
+\definecolor{CCbluesoft}{RGB}{220,235,250} % #DCEBFA
+\definecolor{CCdark}{RGB}{26,43,66}        % #1A2B42
+\definecolor{CCsec}{RGB}{94,107,130}       % text-secondary
+\definecolor{CCbg}{RGB}{247,249,252}       % #F7F9FC
+\definecolor{CCborder}{RGB}{225,232,240}   % #E1E8F0
+\definecolor{CChuman}{RGB}{136,19,66}      % #881342
+\definecolor{CChumansoft}{RGB}{247,213,226}% #f7d5e2
+\definecolor{CCagent}{RGB}{50,73,75}       % #32494B
+\definecolor{CCagentsoft}{RGB}{224,236,238}% #e0ecee
+\definecolor{CCred}{RGB}{199,62,29}        % #C73E1D  HIGH severity
+\definecolor{CCredsoft}{RGB}{253,232,227}  % #FDE8E3
+\definecolor{CCamber}{RGB}{217,119,6}      % #D97706  MED severity
+\definecolor{CCambersoft}{RGB}{254,243,199}% #FEF3C7
+
+\usepackage[framemethod=TikZ]{mdframed}
+\mdfdefinestyle{diagramframe}{%
+    roundcorner=0pt,
+    linecolor=CCborder,
+    linewidth=0.8pt,
+    innertopmargin=20pt,
+    innerbottommargin=20pt,
+    innerrightmargin=20pt,
+    innerleftmargin=20pt,
+    backgroundcolor=CCbg}
+
+\newcommand\blfootnote[1]{%
+  \begingroup\renewcommand\thefootnote{}\footnote{#1}\addtocounter{footnote}{-1}\endgroup}
+
+% ==== widths ====
+\def\exMinipage{782mm}
+\def\exFifthMinipage{150mm}
+
+%==================================================================================
+\begin{document}
+
+\include{Poster_content}
+
+{\phantom{\begin{tikzpicture}
+\includegraphics[scale=1]{eth_logo_kurz_pos_13.pdf}
+\end{tikzpicture}}
+\begin{tikzpicture}
+\includegraphics[width=16.666cm]{eth_logo_kurz_pos_13.pdf}
+\end{tikzpicture} \hspace{64.2cm}
+\begin{minipage}[b]{\exFifthMinipage}
+\department
+\end{minipage}
+\\[10pt]
+{\phantom{\begin{tikzpicture}
+\includegraphics[scale=2]{eth_logo_kurz_pos_13.pdf}
+\end{tikzpicture}}
+
+% ================================================================
+%  TITLE BLOCK — ETH Blue background only
+% ================================================================
+\colorbox{\postercolor}{%
+\begin{minipage}[t]{\exMinipage}
+\vspace{1.6cm}\hspace{1cm}
+\begin{minipage}[t]{770mm}
+\postertitle
+\vspace{1.2cm}
+\tagline
+\end{minipage}
+\\[2.6cm]
+\end{minipage}%
+}
+\\[10pt]
+
+% ---- Diagram panel — no colored background ----
+\hspace{0.5cm}
+\begin{minipage}[t]{781mm}
+\maindiagram
+\end{minipage}
+\\[14pt]
+\begin{minipage}[l]{\exMinipage}
+{\partner}
+\end{minipage}
+
+\end{document}

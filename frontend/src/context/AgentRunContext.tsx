@@ -1,18 +1,15 @@
 import { createContext, useContext, useState, useRef, type ReactNode } from 'react'
 import type { Task, Agent } from '../lib/types'
 import type { AgentStep, AgentResult, WsMessage } from '../components/agent/agentTypes'
-import * as api from '../lib/api'
 
 export type AgentRunState = 'idle' | 'running' | 'complete' | 'error'
 
 interface AgentRunContextValue {
-  // Config (persists across navigation)
   apiKey: string
   setApiKey: (key: string) => void
   provider: 'nvidia' | 'google'
   setProvider: (p: 'nvidia' | 'google') => void
 
-  // Run state
   runState: AgentRunState
   currentTaskIdx: number
   totalTasks: number
@@ -21,11 +18,9 @@ interface AgentRunContextValue {
   errorMsg: string
   liveStepCount: number
   progress: number
-  // Which project+version this run belongs to
   runningSiteId: string | null
   runningVersionId: string | null
 
-  // Actions
   startRun: (siteId: string, siteUrl: string, tasks: Task[], versionId?: string, selectedAgents?: Agent[]) => void
   stopRun: () => void
 }
@@ -40,7 +35,7 @@ function runSingleTask(
   agentUrl: string,
   onStatus: (msg: string) => void,
   onStep: (step: AgentStep) => void,
-  wsRef: React.MutableRefObject<WebSocket | null>,
+  wsSet: React.MutableRefObject<Set<WebSocket>>,
   siteId?: string,
   taskId?: number,
   userToken?: string,
@@ -50,7 +45,7 @@ function runSingleTask(
   return new Promise((resolve, reject) => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws/run`)
-    wsRef.current = ws
+    wsSet.current.add(ws)
 
     ws.onopen = () => {
       const fullTask = agentPersona ? `[Persona: ${agentPersona}]\n\n${taskTitle}` : taskTitle
@@ -69,10 +64,11 @@ function runSingleTask(
       const msg: WsMessage = JSON.parse(event.data)
       if (msg.type === 'status') onStatus(msg.message)
       else if (msg.type === 'step') onStep(msg.data)
-      else if (msg.type === 'complete') { resolve(msg.data); ws.close() }
-      else if (msg.type === 'error') { reject(new Error(msg.message)); ws.close() }
+      else if (msg.type === 'complete') { wsSet.current.delete(ws); resolve(msg.data); ws.close() }
+      else if (msg.type === 'error') { wsSet.current.delete(ws); reject(new Error(msg.message)); ws.close() }
     }
-    ws.onerror = () => reject(new Error('WebSocket connection failed — is the agent backend running?'))
+    ws.onclose = () => wsSet.current.delete(ws)
+    ws.onerror = () => { wsSet.current.delete(ws); reject(new Error('WebSocket connection failed — is the agent backend running?')) }
   })
 }
 
@@ -94,19 +90,18 @@ export function AgentRunProvider({ children }: { children: ReactNode }) {
   const [runningSiteId, setRunningSiteId] = useState<string | null>(null)
   const [runningVersionId, setRunningVersionId] = useState<string | null>(null)
 
-  const wsRef = useRef<WebSocket | null>(null)
+  const wsSetRef = useRef<Set<WebSocket>>(new Set())
   const isRunningRef = useRef(false)
+  const completedRunsRef = useRef(0)
 
-  // Use actual avg steps/task from completed tasks; fall back to 20 until data is available
-  const expectedPerTask = currentTaskIdx > 0 ? totalCompletedSteps / currentTaskIdx : 20
-  const withinTask = Math.min(liveStepCount / Math.max(expectedPerTask, 1), 0.95)
   const progress = runState === 'complete' ? 100
     : runState === 'idle' || totalTasks === 0 ? 0
-    : Math.round(((currentTaskIdx + withinTask) / totalTasks) * 100)
+    : Math.min(99, Math.round((currentTaskIdx / totalTasks) * 100))
 
   function stopRun() {
     isRunningRef.current = false
-    wsRef.current?.close()
+    for (const ws of wsSetRef.current) ws.close()
+    wsSetRef.current.clear()
     setRunState('idle')
     setStatusMsg('')
   }
@@ -114,94 +109,102 @@ export function AgentRunProvider({ children }: { children: ReactNode }) {
   async function startRun(siteId: string, siteUrl: string, tasks: Task[], versionId?: string, selectedAgents?: Agent[]) {
     if (isRunningRef.current) return
     setErrorMsg('')
-    if (!apiKey.trim()) {
-      setErrorMsg('Enter an API key above before running agents.')
-      return
-    }
-    if (tasks.length === 0) {
-      setErrorMsg('Add at least one task in Step 1 before running agents.')
-      return
-    }
+    if (!apiKey.trim()) { setErrorMsg('Enter an API key above before running agents.'); return }
+    if (tasks.length === 0) { setErrorMsg('Add at least one task in Step 1 before running agents.'); return }
+
     isRunningRef.current = true
     setRunningSiteId(siteId)
     setRunningVersionId(versionId ?? null)
 
     const agentUrl = import.meta.env.VITE_BACKEND_URL ?? import.meta.env.VITE_AGENT_URL ?? window.location.origin
-    const allSteps: AgentStep[] = []
 
-    // If specific agents are selected, run all tasks once per agent; otherwise one pass
     const agentRuns: Array<{ name: string; model?: string; persona?: string }> =
       selectedAgents && selectedAgents.length > 0
         ? selectedAgents.map(a => ({ name: a.name, model: a.model || undefined, persona: a.prompt || undefined }))
         : [{ name: 'Agent' }]
 
     const totalRuns = agentRuns.length * tasks.length
+    completedRunsRef.current = 0
+
     setRunState('running')
     setTotalTasks(totalRuns)
     setCurrentTaskIdx(0)
     setLiveStepCount(0)
     setTotalCompletedSteps(0)
-    setStatusMsg('Initialising…')
+    setRunningTaskTitle(tasks[0]?.title ?? '')
 
-    let runIdx = 0
-    for (let ai = 0; ai < agentRuns.length; ai++) {
-      const agentRun = agentRuns[ai]
-      for (let i = 0; i < tasks.length; i++) {
-        if (!isRunningRef.current) return
-        const task = tasks[i]
-        setCurrentTaskIdx(runIdx)
-        setLiveStepCount(0)
-        setRunningTaskTitle(task.title)
-        const agentLabel = agentRuns.length > 1 ? `${agentRun.name} — ` : ''
-        setStatusMsg(`${agentLabel}Task ${i + 1}/${tasks.length} — ${task.title}`)
-
-        const userToken = localStorage.getItem('ciphercorgi_token') ?? undefined
-        try {
-          const focusPart = task.focusAreas && task.focusAreas.length > 0
-            ? ` Pay special attention to: ${task.focusAreas.join(', ')}.`
-            : ''
-          const taskPrompt = `${task.title}${task.description ? '. ' + task.description : ''}${focusPart}`
-          const result = await runSingleTask(
-            taskPrompt,
-            siteUrl,
-            provider,
-            apiKey.trim(),
-            agentUrl,
-            (msg) => { if (isRunningRef.current) setStatusMsg(msg) },
-            (step) => {
-              if (!isRunningRef.current) return
-              setLiveStepCount(step.step_number)
-              setStatusMsg(`Step ${step.step_number} — ${step.action_type.replace(/_/g, ' ')}`)
-            },
-            wsRef,
-            siteId,
-            task.id,
-            userToken,
-            agentRun.model,
-            agentRun.persona,
-          )
-          allSteps.push(...result.steps)
-          setTotalCompletedSteps(prev => prev + result.steps.length)
-        } catch (err) {
-          if (!isRunningRef.current) return
-          isRunningRef.current = false
-          setRunState('error')
-          setStatusMsg((err as Error).message)
-          return
-        }
-        runIdx++
-      }
+    const parallel = agentRuns.length > 1
+    if (parallel) {
+      setStatusMsg(`Starting ${agentRuns.length} agents in parallel…`)
+    } else {
+      setStatusMsg(`Task 1/${tasks.length} — ${tasks[0]?.title ?? ''}`)
     }
+
+    const userToken = localStorage.getItem('ciphercorgi_token') ?? undefined
+
+    const results = await Promise.allSettled(
+      agentRuns.map(async (agentRun, _ai) => {
+        const agentSteps: AgentStep[] = []
+        for (let i = 0; i < tasks.length; i++) {
+          if (!isRunningRef.current) return agentSteps
+          const task = tasks[i]
+          const focusPart = task.focusAreas?.length ? ` Pay special attention to: ${task.focusAreas.join(', ')}.` : ''
+          const taskPrompt = `${task.title}${task.description ? '. ' + task.description : ''}${focusPart}`
+
+          try {
+            const result = await runSingleTask(
+              taskPrompt, siteUrl, provider, apiKey.trim(), agentUrl,
+              (msg) => {
+                if (!isRunningRef.current) return
+                if (!parallel) setStatusMsg(msg)
+              },
+              (step) => {
+                if (!isRunningRef.current) return
+                if (!parallel) {
+                  setLiveStepCount(step.step_number)
+                  setStatusMsg(`Step ${step.step_number} — ${step.action_type.replace(/_/g, ' ')}`)
+                } else {
+                  setLiveStepCount(prev => prev + 1)
+                }
+              },
+              wsSetRef,
+              siteId, task.id, userToken, agentRun.model, agentRun.persona,
+            )
+            agentSteps.push(...result.steps)
+            setTotalCompletedSteps(prev => prev + result.steps.length)
+          } catch (err) {
+            if (!isRunningRef.current) return agentSteps
+            if (!parallel) {
+              isRunningRef.current = false
+              setRunState('error')
+              setStatusMsg((err as Error).message)
+              return agentSteps
+            }
+          }
+
+          completedRunsRef.current++
+          setCurrentTaskIdx(completedRunsRef.current)
+          if (parallel) {
+            setStatusMsg(`${completedRunsRef.current} of ${totalRuns} runs complete (${agentRuns.length} agents in parallel)`)
+          } else {
+            const next = i + 1
+            if (next < tasks.length) setStatusMsg(`Task ${next + 1}/${tasks.length} — ${tasks[next].title}`)
+          }
+
+          if (!parallel) setRunningTaskTitle(tasks[Math.min(i + 1, tasks.length - 1)].title)
+        }
+        return agentSteps
+      })
+    )
 
     if (!isRunningRef.current) return
     isRunningRef.current = false
 
+    const allSteps = results.flatMap(r => r.status === 'fulfilled' ? (r.value ?? []) : [])
+
     try {
       const runKey = versionId ? `ciphercorgi_agent_run_${siteId}_${versionId}` : `ciphercorgi_agent_run_${siteId}`
-      localStorage.setItem(
-        runKey,
-        JSON.stringify({ siteId, steps: allSteps, completedAt: Date.now() }),
-      )
+      localStorage.setItem(runKey, JSON.stringify({ siteId, steps: allSteps, completedAt: Date.now() }))
     } catch { /* storage quota exceeded */ }
 
     setRunState('complete')

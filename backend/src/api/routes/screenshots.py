@@ -1,7 +1,7 @@
 import json
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from api.deps import get_db
@@ -46,7 +46,7 @@ def list_screenshots(session_id: str, db: Session = Depends(get_db)):
             "trigger": r.trigger,
             "action_id": r.action_id,
             "created_at_ms": int(r.created_at.timestamp() * 1000) if r.created_at else None,
-            "ready": r.file_path is not None,
+            "ready": r.data is not None or r.file_path is not None,
         }
         for r in rows
     ]
@@ -68,7 +68,7 @@ def list_journey_screenshots(journey_id: int, db: Session = Depends(get_db)):
             "trigger": r.trigger,
             "action_id": r.action_id,
             "created_at_ms": int(r.created_at.timestamp() * 1000) if r.created_at else None,
-            "ready": r.file_path is not None,
+            "ready": r.data is not None or r.file_path is not None,
         }
         for r in rows
     ]
@@ -77,9 +77,13 @@ def list_journey_screenshots(journey_id: int, db: Session = Depends(get_db)):
 @v1_router.get("/screenshots/{screenshot_id}/image")
 def get_screenshot_image(screenshot_id: int, db: Session = Depends(get_db)):
     sc = db.get(Screenshot, screenshot_id)
-    if not sc or not sc.file_path:
-        raise HTTPException(status_code=404, detail="Screenshot not found or not ready")
-    return FileResponse(sc.file_path, media_type="image/png")
+    if not sc:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    if sc.data:
+        return Response(content=sc.data, media_type="image/png")
+    if sc.file_path:
+        return FileResponse(sc.file_path, media_type="image/png")
+    raise HTTPException(status_code=404, detail="Screenshot not ready")
 
 
 @v1_router.get("/screenshots/{screenshot_id}/events")

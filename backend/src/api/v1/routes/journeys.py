@@ -39,7 +39,7 @@ def _journey_to_response(j: Journey, strip_screenshots: bool = False, db: Sessio
             rows = db.query(Screenshot).filter(Screenshot.session_id == session_id).all()
             screenshot_urls = {
                 r.action_id: f"/api/v1/screenshots/{r.id}/image"
-                for r in rows if r.action_id and r.file_path
+                for r in rows if r.action_id and (r.data is not None or r.file_path is not None)
             }
         steps = _strip_screenshots(steps, screenshot_urls)
     return JourneyResponse(

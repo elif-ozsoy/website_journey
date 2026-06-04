@@ -53,16 +53,30 @@ async def websocket_run(websocket: WebSocket):
 
         original_task = task  # preserve before policy augmentation
 
+        policy_before_date = config.get("policy_before_date") or None
+
         # Build behavioral policy when requested
         policy: dict = {}
+        policy_from_snapshot: bool = False
         if use_policy and site_id:
             try:
                 db = SessionLocal()
                 try:
                     if run_mode == "ai_policy":
                         policy = policy_svc.build_ai_policy(site_id, db)
+                    elif run_mode == "prev_policy":
+                        policy = policy_svc.build_policy(site_id, db, before_timestamp=policy_before_date)
                     else:
                         policy = policy_svc.build_policy(site_id, db)
+
+                    if policy and run_mode not in ("ai_policy", "prev_policy"):
+                        # Persist so future runs can fall back to this version
+                        policy_svc.save_policy_snapshot(site_id, policy, db)
+                    elif not policy and run_mode not in ("ai_policy", "prev_policy"):
+                        # No human events yet — use the last saved snapshot
+                        policy = policy_svc.load_policy_snapshot(site_id, db)
+                        if policy:
+                            policy_from_snapshot = True
                 finally:
                     db.close()
             except Exception:
@@ -155,6 +169,10 @@ async def websocket_run(websocket: WebSocket):
                         if use_policy:
                             if run_mode == "ai_policy":
                                 journey_source = "policy_bot_ai"
+                            elif run_mode == "prev_policy":
+                                journey_source = "policy_bot_prev"
+                            elif policy_from_snapshot:
+                                journey_source = "policy_bot_snapshot"
                             else:
                                 journey_source = "policy_bot_human"
                         else:

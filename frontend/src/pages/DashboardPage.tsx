@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { useProjectContext } from '../context/ProjectContext'
@@ -47,11 +47,12 @@ function ReEvalModal({ onClose, onConfirm }: { onClose: () => void; onConfirm: (
 }
 
 import AggregateFlowView from '../components/dashboard/AggregateFlowView'
-import ActionPointsList from '../components/dashboard/ActionPointsList'
+import ActionPointsList, { GlyphDot } from '../components/dashboard/ActionPointsList'
 import HeatmapCarousel from '../components/dashboard/HeatmapCarousel'
 import HeatmapInsightsPanel from '../components/dashboard/HeatmapInsightsPanel'
 import ComparePanel from '../components/dashboard/ComparePanel'
 import SankeyInsightsPanel from '../components/dashboard/SankeyInsightsPanel'
+import AggregateInsightsPanel from '../components/dashboard/AggregateInsightsPanel'
 
 import {
   getStepsFromSessionEvents,
@@ -69,7 +70,7 @@ import type { CompareHighlight, DiagramRef } from '../lib/api'
 
 interface SelectOption { id: string; name: string; meta?: string }
 
-type ActiveView = 'overview' | 'aggregate' | 'heatmap' | 'human_vs_ai' | 'time_event' | 'horizon_graph' | 'linked_flow'// ─── Nav item icons ───────────────────────────────────────────────────────────
+type ActiveView = 'overview' | 'aggregate' | 'heatmap' | 'human_vs_ai' | 'horizon_graph' | 'linked_flow'// ─── Nav item icons ───────────────────────────────────────────────────────────
 
 // ─── Filter pills ─────────────────────────────────────────────────────────────
 
@@ -126,17 +127,37 @@ function ToggleRow({ label, description, checked, onChange }: { label: string; d
 function SettingsPanel({
   agentOptions, sessionOptions,
   agentFilter, sessionFilter,
+  taskOptions,
+  taskFilterMode,
+  aggregateTaskId,
+  heatmapTaskFilter,
+  aggTrajectories,
+  prevVersionLabel,
   onToggleAgent, onSelectAllAgents,
   onToggleSession, onSelectAllSessions,
+  onSelectAggregateTask,
+  onToggleHeatmapTask,
+  onSelectAllHeatmapTasks,
+  onToggleAggTrajectory,
 }: {
   agentOptions: SelectOption[]
   sessionOptions: SelectOption[]
   agentFilter: Set<string> | null
   sessionFilter: Set<string> | null
+  taskOptions: SelectOption[]
+  taskFilterMode: 'none' | 'single' | 'multi'
+  aggregateTaskId: number | null
+  heatmapTaskFilter: Set<number> | null
+  aggTrajectories?: { showHuman: boolean; showAi: boolean; showPrev: boolean } | null
+  prevVersionLabel?: string
   onToggleAgent: (id: string) => void
   onSelectAllAgents: () => void
   onToggleSession: (id: string) => void
   onSelectAllSessions: () => void
+  onSelectAggregateTask: (id: number | null) => void
+  onToggleHeatmapTask: (id: number) => void
+  onSelectAllHeatmapTasks: () => void
+  onToggleAggTrajectory?: (which: 'human' | 'ai' | 'prev') => void
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -155,6 +176,9 @@ function SettingsPanel({
   const activeFilters = [
     !agentAllSelected && agentFilter!.size < agentOptions.length,
     !sessionAllSelected && sessionFilter!.size < sessionOptions.length,
+    taskFilterMode === 'single' && aggregateTaskId !== null,
+    taskFilterMode === 'multi' && heatmapTaskFilter !== null && heatmapTaskFilter.size < taskOptions.length,
+    aggTrajectories && (!aggTrajectories.showHuman || !aggTrajectories.showAi || !aggTrajectories.showPrev),
   ].filter(Boolean).length
 
   return (
@@ -210,6 +234,48 @@ function SettingsPanel({
               {sessionOptions.length === 0 && <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-muted)' }}>No sessions yet</span>}
             </div>
           </div>
+          {aggTrajectories && onToggleAggTrajectory && (
+            <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: 9 }}>Trajectories</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <FilterPill label="Human" active={aggTrajectories.showHuman} color="#881342" onClick={() => onToggleAggTrajectory('human')} />
+                <FilterPill label="AI" active={aggTrajectories.showAi} color="#32494B" onClick={() => onToggleAggTrajectory('ai')} />
+                {prevVersionLabel && (
+                  <FilterPill label={prevVersionLabel} active={aggTrajectories.showPrev} color="#6b7280" onClick={() => onToggleAggTrajectory('prev')} />
+                )}
+              </div>
+            </div>
+          )}
+          {taskFilterMode !== 'none' && (
+            <div style={{ padding: '14px 16px' }}>
+              <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: 9 }}>
+                {taskFilterMode === 'single' ? 'Task' : 'Tasks'}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {taskFilterMode === 'single' ? (
+                  <>
+                    {taskOptions.map(o => (
+                      <FilterPill key={o.id} label={o.name} active={aggregateTaskId === Number(o.id)} color="#3c1580" onClick={() => onSelectAggregateTask(Number(o.id))} />
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    <FilterPill label="All" active={heatmapTaskFilter === null} color="#3c1580" onClick={onSelectAllHeatmapTasks} />
+                    {taskOptions.map(o => (
+                      <FilterPill
+                        key={o.id}
+                        label={o.name}
+                        active={heatmapTaskFilter === null || heatmapTaskFilter.has(Number(o.id))}
+                        color="#3c1580"
+                        onClick={() => onToggleHeatmapTask(Number(o.id))}
+                      />
+                    ))}
+                  </>
+                )}
+                {taskOptions.length === 0 && <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-muted)' }}>No tasks available</span>}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -224,9 +290,17 @@ function SettingsPanel({
 export default function DashboardPage() {
   const { siteId } = useParams<{ siteId: string }>()
   const navigate = useNavigate()
-  const { tasks: contextTasks, agents, sessions: allSessions, journeys: allJourneys, testerLink, siteUrl } = useProjectContext()
+  const { tasks: contextTasks, agents, sessions: allSessions, journeys: allJourneys, testerLink, siteUrl, refreshJourneys, refreshSessions } = useProjectContext()
 
-  const { runState, currentTaskIdx, totalTasks, runningTaskTitle, statusMsg, progress, runningSiteId } = useAgentRun()
+  // Refresh journey + session counts on every dashboard mount so the cache
+  // invalidation logic sees the latest data and re-runs analysis when needed.
+  useEffect(() => {
+    refreshJourneys()
+    refreshSessions()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const { runState, currentTaskIdx, totalTasks, runningTaskTitle, statusMsg, progress, runningSiteId, startRun } = useAgentRun()
   const agentIsRunning = runState === 'running' && runningSiteId === siteId
 
   const projects: Project[] = JSON.parse(localStorage.getItem(PROJECTS_STORAGE_KEY) ?? '[]')
@@ -241,6 +315,7 @@ export default function DashboardPage() {
   const [actionAnnotation, setActionAnnotation] = useState<import('../lib/api').AnnotateResult | null>(null)
   const [actionPending, setActionPending] = useState(false)
   const [overviewHoveredDot, setOverviewHoveredDot] = useState<number | null>(null)
+  const [overviewPinnedDot, setOverviewPinnedDot] = useState<number | null>(null)
 
   useEffect(() => {
     const ann = actionAnnotation
@@ -255,20 +330,28 @@ export default function DashboardPage() {
 
   const [compareContext, setCompareContext] = useState<{
     highlight?: CompareHighlight
-    note?: string
+    actionPointText?: string
+    taskTitle?: string
+    evidence?: string
     explanation?: string
     targetView: ActiveView
   } | null>(null)
+  const [heatmapHighlightText, setHeatmapHighlightText] = useState<string | null>(null)
+  const [heatmapActiveTaskId, setHeatmapActiveTaskId] = useState<number | null>(null)
 
   const [agentFilter, setAgentFilter] = useState<Set<string> | null>(null)
   const [sessionFilter, setSessionFilter] = useState<Set<string> | null>(null)
   const [sankeyDivergences, setSankeyDivergences] = useState<NodeDivergence[]>([])
+  const [aggShowHuman, setAggShowHuman] = useState(true)
+  const [aggShowAi, setAggShowAi] = useState(true)
+  const [aggShowPrev, setAggShowPrev] = useState(true)
 
 
   const [searchParams, setSearchParams] = useSearchParams()
   const navigatingViaLinkRef = useRef(false)
   const urlView = searchParams.get('view') ?? 'overview'
-  const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'human_vs_ai', 'time_event', 'horizon_graph', 'linked_flow'] as ActiveView[]).includes(urlView as ActiveView)    ? (urlView as ActiveView)
+  const activeView: ActiveView = (['overview', 'aggregate', 'heatmap', 'human_vs_ai', 'horizon_graph', 'linked_flow'] as ActiveView[]).includes(urlView as ActiveView)
+    ? (urlView as ActiveView)
     : 'overview'
 
   // Only expose context when the user is on the view it was set for (must be after activeView)
@@ -298,8 +381,7 @@ export default function DashboardPage() {
     policy: 'aggregate',
   }
 
-  function setActiveView(view: ActiveView, clearContext = false) {
-    if (clearContext) setCompareContext(null)
+  function setActiveView(view: ActiveView) {
     setSearchParams((prev: URLSearchParams) => {
       const p = new URLSearchParams(prev)
       p.set('view', view)
@@ -307,23 +389,26 @@ export default function DashboardPage() {
     }, { replace: true })
   }
 
-  function handleNavigateTo(_tab: string, view?: string, note?: string, diagramRef?: DiagramRef) {
+  function handleNavigateTo(_tab: string, view?: string, noteCtx?: { actionPointText: string; taskTitle: string; evidence: string }, diagramRef?: DiagramRef, pointText?: string) {
     const target = (view ? DIAGRAM_VIEW_MAP[view] : undefined) ?? 'aggregate'
-    const HIGHLIGHT_VIEWS: ActiveView[] = ['human_vs_ai', 'horizon_graph', 'linked_flow']
-    // Set context BEFORE changing view so that if setSearchParams triggers a
-    // render before setCompareContext is batched, the context is already ready
-    // when the diagram view mounts.
+    const HIGHLIGHT_VIEWS: ActiveView[] = ['human_vs_ai', 'horizon_graph', 'linked_flow', 'aggregate']
     navigatingViaLinkRef.current = true
     if (HIGHLIGHT_VIEWS.includes(target) && diagramRef) {
-      setCompareContext({ highlight: diagramRef.highlight, note, explanation: diagramRef.diagram_explanation, targetView: target })
+      setCompareContext({ highlight: diagramRef.highlight, ...noteCtx, explanation: diagramRef.diagram_explanation, targetView: target })
     } else {
       setCompareContext(null)
+    }
+    if (target === 'heatmap') {
+      setHeatmapHighlightText(pointText ?? null)
+    } else {
+      setHeatmapHighlightText(null)
     }
     setActiveView(target)
   }
 
   const [aggregateTaskId, setAggregateTaskId] = useState<number | null>(null)
-  const [overviewSplitPct, setOverviewSplitPct] = useState(80)
+  const [heatmapTaskFilter, setHeatmapTaskFilter] = useState<Set<number> | null>(null)
+  const [overviewSplitPct, setOverviewSplitPct] = useState(68)
   const overviewContainerRef = useRef<HTMLDivElement>(null)
 
   const [rightPanelW, setRightPanelW] = useState(320)
@@ -357,6 +442,7 @@ export default function DashboardPage() {
     window.addEventListener('mouseup', onUp)
   }
 
+  const [compareMode, setCompareMode] = useState<'ai_vs_human' | 'old_vs_new'>('ai_vs_human')
   const [ratingsSummary, setRatingsSummary] = useState<api.RatingsSummary | null>(null)
   const [compareAnalysis, setCompareAnalysis] = useState<api.ComparativeAnalysis | null>(null)
   const [compareLoading, setCompareLoading] = useState(false)
@@ -396,6 +482,80 @@ export default function DashboardPage() {
     ? activeVersionEntry.tasks
     : contextTasks
 
+  // Previous version data for "Old vs New Version" comparison
+  const hasPrevVersion = activeVersionIdx > 0
+  const prevVersionIdx = activeVersionIdx - 1
+  const prevVersionFrom = prevVersionIdx > 0 ? (versions[prevVersionIdx]?.createdAt ?? null) : null
+  const prevVersionTo = versionFrom  // prev version ends where current begins
+
+  const prevVersionJourneys = useMemo(
+    () => !hasPrevVersion ? [] : allJourneys.filter((j: api.JourneyResponse) =>
+      (!prevVersionFrom || j.completed_at >= prevVersionFrom) && (!prevVersionTo || j.completed_at < prevVersionTo)
+    ),
+    [allJourneys, hasPrevVersion, prevVersionFrom, prevVersionTo],
+  )
+  const prevVersionAgentJourneys = useMemo(
+    () => prevVersionJourneys.filter(j => j.is_agent !== false),
+    [prevVersionJourneys],
+  )
+  const prevVersionAgentSteps = useMemo<import('../components/agent/agentTypes').AgentStep[]>(
+    () => prevVersionAgentJourneys.flatMap(j => j.steps as import('../components/agent/agentTypes').AgentStep[]),
+    [prevVersionAgentJourneys],
+  )
+  const prevVersionLabel = versions[prevVersionIdx]?.label ?? 'Previous Version'
+
+  const journeyAgentMeta = useMemo(() => {
+    const byPrompt = new Map<string, { id: string; name: string; model?: string }>()
+    agents.forEach(a => {
+      const prompt = (a.prompt ?? '').trim()
+      if (prompt) byPrompt.set(prompt, { id: a.id, name: a.name, model: a.model })
+    })
+
+    function parsePersona(taskTitle: string | null | undefined): string | null {
+      if (!taskTitle) return null
+      const m = taskTitle.match(/^\[Persona:\s*([\s\S]*?)\]\s*/)
+      return m?.[1]?.trim() || null
+    }
+
+    function optionForJourney(j: api.JourneyResponse): SelectOption {
+      const persona = parsePersona(j.task_title)
+      if (persona) {
+        const mapped = byPrompt.get(persona)
+        if (mapped) {
+          return {
+            id: `agent:${mapped.id}`,
+            name: mapped.name,
+            meta: mapped.model,
+          }
+        }
+        const shortPersona = persona.length > 28 ? `${persona.slice(0, 27)}…` : persona
+        return {
+          id: `persona:${persona}`,
+          name: shortPersona,
+          meta: 'persona run',
+        }
+      }
+
+      if (j.source) {
+        return {
+          id: `source:${j.source}`,
+          name: j.source === 'agent' ? 'Agent' : j.source,
+          meta: undefined,
+        }
+      }
+
+      return {
+        id: `journey:${j.id}`,
+        name: `AI Run #${j.id}`,
+        meta: undefined,
+      }
+    }
+
+    return {
+      optionForJourney,
+    }
+  }, [agents])
+
   const agentJourneyCount = journeys.filter(j => j.is_agent !== false).length
   const humanJourneyCount = journeys.filter(j => j.is_agent === false).length
 
@@ -405,31 +565,33 @@ export default function DashboardPage() {
   const humanJourneyCountRef = useRef(humanJourneyCount)
   agentJourneyCountRef.current = agentJourneyCount
   humanJourneyCountRef.current = humanJourneyCount
+  const compareAnalysisRef = useRef(compareAnalysis)
+  compareAnalysisRef.current = compareAnalysis
 
   useEffect(() => {
     setCompareError(null)
-    // DEBUG: cache disabled — always re-run
-    // try {
-    //   const raw = localStorage.getItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId))
-    //   if (raw) {
-    //     const parsed = JSON.parse(raw)
-    //     const cachedAgent: number = parsed._agentCount ?? parsed._journeyCount ?? 0
-    //     const cachedUser: number = parsed._userCount ?? 0
-    //     const hasNew = (agentJourneyCount > 0 || humanJourneyCount > 0) &&
-    //       (agentJourneyCount > cachedAgent || humanJourneyCount > cachedUser)
-    //     if (hasNew) {
-    //       localStorage.removeItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId))
-    //       autoRunVersionRef.current = activeVersionId
-    //       setCompareAnalysis(null)
-    //       handleRunComparative()
-    //       return
-    //     }
-    //     const { _agentCount: _a, _userCount: _u, _journeyCount: _j, ...analysis } = parsed
-    //     setCompareAnalysis(analysis as api.ComparativeAnalysis)
-    //     return
-    //   }
-    // } catch { /* ignore */ }
-    setCompareAnalysis(null)
+    try {
+      const raw = localStorage.getItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId))
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        const cachedAgent: number = parsed._agentCount ?? parsed._journeyCount ?? 0
+        const cachedUser: number = parsed._userCount ?? 0
+        const hasNew = (agentJourneyCount > 0 || humanJourneyCount > 0) &&
+          (agentJourneyCount > cachedAgent || humanJourneyCount > cachedUser)
+        if (hasNew) {
+          localStorage.removeItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId))
+          autoRunVersionRef.current = null  // reset so the auto-run effect fires
+          setCompareAnalysis(null)
+          return
+        }
+        const { _agentCount: _a, _userCount: _u, _journeyCount: _j, ...analysis } = parsed
+        setCompareAnalysis(analysis as api.ComparativeAnalysis)
+        return
+      }
+    } catch { /* ignore */ }
+    // Only blank out the panel if we have nothing to show yet (first load).
+    // If analysis is already visible, leave it in place until the fetch returns.
+    if (!compareAnalysisRef.current) setCompareAnalysis(null)
     api.getStoredAnalysis(siteId!, activeVersionId)
       .then(result => {
         localStorage.setItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId), JSON.stringify({ _agentCount: agentJourneyCountRef.current, _userCount: humanJourneyCountRef.current, ...result }))
@@ -457,10 +619,27 @@ export default function DashboardPage() {
     localStorage.removeItem(ANALYSIS_STORAGE_KEY(siteId!, newVersionId))
     localStorage.removeItem(`ciphercorgi_agent_run_${siteId}`)
     setReEvalOpen(false)
-    navigate(`/projects/${siteId}`)
+
+    // Auto-start agent runs for the new version in background
+    const selectedAgentsForRun = agents.filter(a => a.selected)
+    startRun(siteId!, siteUrl, contextTasks, newVersionId, selectedAgentsForRun.length > 0 ? selectedAgentsForRun : undefined)
+
+    // Flag the aggregate view to auto-run the prev policy when it next mounts
+    if (versionFrom) {
+      localStorage.setItem(`cc_run_prev_policy_${siteId}`, JSON.stringify({ prevVersionEndsAt: versionFrom }))
+    }
+
+    // Navigate to comparison view with new version selected, defaulting to old vs new
+    setCompareMode('old_vs_new')
+    setSearchParams(prev => {
+      const p = new URLSearchParams(prev)
+      p.set('view', 'human_vs_ai')
+      p.set('version', newVersionId)
+      return p
+    }, { replace: true })
   }
 
-  const agentJourneys = useMemo(() => {
+  const allAgentJourneys = useMemo(() => {
     const all = journeys.filter(j => j.is_agent !== false)
     if (all.length === 0) {
       const local = loadAgentSteps(siteId!, activeVersionId)
@@ -468,14 +647,37 @@ export default function DashboardPage() {
         return [{ id: -1, site_id: siteId!, task_id: null, user_id: null, task_title: '', total_steps: local.length, steps: local, completed_at: '', updated_at: '', llm_analysis: null, is_agent: true, embedding: null, source: 'local' }]
       }
     }
-    if (agentFilter !== null) {
-      return all.filter(j => j.user_id !== null && agentFilter.has(j.user_id))
-    }
     return all
-  }, [journeys, siteId, agentFilter])
+  }, [journeys, siteId, activeVersionId])
 
-const agentJourneySteps = useMemo<AgentStep[][]>(() => agentJourneys.map(j => j.steps as AgentStep[]), [agentJourneys])
-const agentLabels = useMemo(() => agentJourneys.map((_, i) => `AI Run #${i + 1}`), [agentJourneys])
+  const agentOptions = useMemo<SelectOption[]>(() => {
+    const out = new Map<string, SelectOption>()
+    for (const j of allAgentJourneys) {
+      const opt = journeyAgentMeta.optionForJourney(j)
+      if (!out.has(opt.id)) out.set(opt.id, opt)
+    }
+    return Array.from(out.values())
+  }, [allAgentJourneys, journeyAgentMeta])
+
+  const agentOptionIds = useMemo(() => agentOptions.map(o => o.id), [agentOptions])
+
+  const agentJourneys = useMemo(() => {
+    if (agentFilter === null) return allAgentJourneys
+    return allAgentJourneys.filter(j => {
+      const key = journeyAgentMeta.optionForJourney(j).id
+      return agentFilter.has(key)
+    })
+  }, [allAgentJourneys, agentFilter, journeyAgentMeta])
+
+  useEffect(() => {
+    if (agentFilter === null) return
+    const valid = new Set(agentOptionIds)
+    const next = new Set(Array.from(agentFilter).filter(id => valid.has(id)))
+    // Keep empty selection as-is so users can intentionally hide all AI runs.
+    if (next.size !== agentFilter.size) {
+      setAgentFilter(next)
+    }
+  }, [agentFilter, agentOptionIds])
 
   const aggFilteredJourneys = useMemo(() =>
     aggregateTaskId !== null ? agentJourneys.filter(j => j.task_id === aggregateTaskId) : agentJourneys,
@@ -526,9 +728,9 @@ useEffect(() => {
 // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [sessionIds, siteUrl])
 
-  const humanJourneyMeta = useMemo<{ steps: AgentStep[]; label: string }[]>(() => {
+  const humanJourneyMeta = useMemo<{ steps: AgentStep[]; label: string; taskId: string | null }[]>(() => {
     const ids = sessionFilter === null ? sessions.map(s => s.id) : Array.from(sessionFilter)
-    const out: { steps: AgentStep[]; label: string }[] = []
+    const out: { steps: AgentStep[]; label: string; taskId: string | null }[] = []
     ids.forEach(sid => {
       const taskJourneys = humanJourneysBySession.get(sid) ?? []
       const userNum = sessions.findIndex(s => s.id === sid) + 1
@@ -539,6 +741,7 @@ useEffect(() => {
         out.push({
           steps: tj.steps,
           label: taskJourneys.length > 1 ? `${userLabel} · ${taskShort}` : userLabel,
+          taskId: tj.taskId,
         })
       })
     })
@@ -560,30 +763,66 @@ useEffect(() => {
     return out
   }, [humanJourneysBySession, sessionFilter])
 
-  const humanLabels = useMemo(() => humanJourneyMeta.map(j => j.label), [humanJourneyMeta])
+  // Task-filtered variants for linked_flow / horizon_graph / human_vs_ai views
+  const sharedTaskFilteredAgentJourneys = useMemo(() => {
+    if (heatmapTaskFilter === null) return agentJourneys
+    return agentJourneys.filter(j => heatmapTaskFilter.has(j.task_id ?? -1))
+  }, [agentJourneys, heatmapTaskFilter])
 
+  const sharedTaskFilteredAgentJourneySteps = useMemo<AgentStep[][]>(
+    () => sharedTaskFilteredAgentJourneys.map(j => j.steps as AgentStep[]),
+    [sharedTaskFilteredAgentJourneys],
+  )
+  const sharedTaskFilteredAgentLabels = useMemo(
+    () => sharedTaskFilteredAgentJourneys.map((_, i) => `AI Run #${i + 1}`),
+    [sharedTaskFilteredAgentJourneys],
+  )
 
+  const sharedTaskFilteredHumanJourneyMeta = useMemo(() => {
+    if (heatmapTaskFilter === null) return humanJourneyMeta
+    return humanJourneyMeta.filter(j => j.taskId !== null && heatmapTaskFilter.has(Number(j.taskId)))
+  }, [humanJourneyMeta, heatmapTaskFilter])
+
+  const sharedTaskFilteredHumanJourneySteps = useMemo<AgentStep[][]>(
+    () => sharedTaskFilteredHumanJourneyMeta.map(j => j.steps),
+    [sharedTaskFilteredHumanJourneyMeta],
+  )
+  const sharedTaskFilteredHumanLabels = useMemo(
+    () => sharedTaskFilteredHumanJourneyMeta.map(j => j.label),
+    [sharedTaskFilteredHumanJourneyMeta],
+  )
 
   const allAgentSteps = useMemo<AgentStep[]>(
     () => agentJourneys.flatMap(j => j.steps as AgentStep[]),
     [agentJourneys],
   )
 
-  const allHumanSteps = useMemo<AgentStep[]>(
-    () => humanJourneySteps.flat(),
-    [humanJourneySteps],
+  const sharedTaskFilteredAllAgentSteps = useMemo<AgentStep[]>(
+    () => sharedTaskFilteredAgentJourneySteps.flat(),
+    [sharedTaskFilteredAgentJourneySteps],
   )
-
-  const humanSessionStepCounts = useMemo(
-    () => humanJourneySteps.map(s => s.length).filter(n => n > 0),
-    [humanJourneySteps],
+  const sharedTaskFilteredAllHumanSteps = useMemo<AgentStep[]>(
+    () => sharedTaskFilteredHumanJourneySteps.flat(),
+    [sharedTaskFilteredHumanJourneySteps],
+  )
+  const sharedTaskFilteredHumanSessionStepCounts = useMemo(
+    () => sharedTaskFilteredHumanJourneySteps.map(s => s.length).filter(n => n > 0),
+    [sharedTaskFilteredHumanJourneySteps],
   )
 
   const visibleSessionCount = sessionFilter === null ? sessions.length : sessionFilter.size
 
-  // Analysis is generated ONLY when the user explicitly clicks "Run Analysis" /
-  // "Re-run analysis". On mount we just load any stored result (effect above);
-  // we never auto-run on page refresh or when returning to the dashboard.
+  const autoRunVersionRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (autoRunVersionRef.current === activeVersionId) return
+    if (compareLoading || compareAnalysis) return
+    if (agentJourneyCount === 0 && humanJourneyCount === 0) return
+    const cached = localStorage.getItem(ANALYSIS_STORAGE_KEY(siteId!, activeVersionId))
+    if (cached) return
+    autoRunVersionRef.current = activeVersionId
+    handleRunComparative()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeVersionId, compareLoading, compareAnalysis, agentJourneyCount, humanJourneyCount])
 
   async function handleRunComparative() {
     if (compareLoading) return
@@ -607,14 +846,14 @@ useEffect(() => {
     handleRunComparative()
   }
 
-  function toggleAgent(id: string) {
+  const toggleAgent = useCallback((id: string) => {
     setAgentFilter(prev => {
-      const allIds = agents.map(a => a.id)
+      const allIds = agentOptionIds
       const current = prev === null ? new Set(allIds) : new Set(prev)
       if (current.has(id)) { current.delete(id); return current }
       else { current.add(id); if (current.size === allIds.length) return null; return current }
     })
-  }
+  }, [agentOptionIds])
   function toggleSession(id: string) {
     setSessionFilter(prev => {
       const allIds = sessions.map(s => s.id)
@@ -624,12 +863,56 @@ useEffect(() => {
     })
   }
 
-  const agentOptions: SelectOption[] = agents.map(a => ({ id: a.id, name: a.name, meta: a.model }))
+  function toggleHeatmapTask(id: number) {
+    setHeatmapTaskFilter(prev => {
+      const allIds = tasks.map(t => t.id)
+      const current = prev === null ? new Set(allIds) : new Set(prev)
+      if (current.has(id)) {
+        current.delete(id)
+        return current
+      }
+      current.add(id)
+      if (current.size === allIds.length) return null
+      return current
+    })
+  }
+
   const humanOptions: SelectOption[] = sessions.map(s => ({
     id: s.id,
     name: `Session ${s.id.slice(0, 8)}`,
     meta: new Date(s.startedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
   }))
+  const taskOptions: SelectOption[] = tasks.map(t => ({ id: String(t.id), name: t.title }))
+  const taskFilterMode: 'none' | 'single' | 'multi' = activeView === 'aggregate'
+    ? 'single'
+    : (activeView === 'heatmap' || activeView === 'linked_flow' || activeView === 'human_vs_ai' || activeView === 'horizon_graph')
+      ? 'multi'
+      : 'none'
+
+  const filtersControl = (
+    <SettingsPanel
+      agentOptions={agentOptions} sessionOptions={humanOptions}
+      agentFilter={agentFilter} sessionFilter={sessionFilter}
+      taskOptions={taskOptions}
+      taskFilterMode={taskFilterMode}
+      aggregateTaskId={aggregateTaskId}
+      heatmapTaskFilter={heatmapTaskFilter}
+      aggTrajectories={activeView === 'aggregate' ? { showHuman: aggShowHuman, showAi: aggShowAi, showPrev: aggShowPrev } : null}
+      prevVersionLabel={hasPrevVersion ? prevVersionLabel : undefined}
+      onToggleAgent={toggleAgent}
+      onSelectAllAgents={() => setAgentFilter(null)}
+      onToggleSession={toggleSession}
+      onSelectAllSessions={() => setSessionFilter((prev: Set<string> | null) => prev === null ? new Set<string>() : null)}
+      onSelectAggregateTask={setAggregateTaskId}
+      onToggleHeatmapTask={toggleHeatmapTask}
+      onSelectAllHeatmapTasks={() => setHeatmapTaskFilter(null)}
+      onToggleAggTrajectory={which => {
+        if (which === 'human') setAggShowHuman(v => !v)
+        else if (which === 'ai') setAggShowAi(v => !v)
+        else setAggShowPrev(v => !v)
+      }}
+    />
+  )
 
   const hasAggData = aggJourneySteps.length > 0
 
@@ -644,16 +927,19 @@ useEffect(() => {
         <div className="dash-topbar">
           {/* Left: back arrow + view title */}
           <div className="dash-topbar-left">
-            <button onClick={() => navigate(`/projects/${siteId}`)} title="Back to Project Overview" className="dash-topbar-back">
+            <button
+              onClick={() => activeView === 'overview' ? navigate(`/projects/${siteId}`) : setActiveView('overview')}
+              title={activeView === 'overview' ? 'Back to Project Overview' : 'Back to Action Points'}
+              className="dash-topbar-back"
+            >
               <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3L5 8l5 5"/></svg>
             </button>
             <span className="dash-topbar-view-name">
                   {{
                     overview: 'Action Points',
-                    aggregate: 'Aggregate Journeys',
+                    aggregate: 'Human steered Agent',
                     heatmap: 'Heatmap',
                     human_vs_ai: 'Human vs AI',
-                    time_event: 'Time-Event-Overview',
                     horizon_graph: 'Horizon Graph',
                     linked_flow: 'Flow + Horizon',
                   }[activeView]}
@@ -679,14 +965,6 @@ useEffect(() => {
 
           {/* Right: controls */}
           <div className="dash-topbar-right">
-            <SettingsPanel
-              agentOptions={agentOptions} sessionOptions={humanOptions}
-              agentFilter={agentFilter} sessionFilter={sessionFilter}
-              onToggleAgent={toggleAgent}
-              onSelectAllAgents={() => setAgentFilter((prev: Set<string> | null) => prev === null ? new Set<string>() : null)}
-              onToggleSession={toggleSession}
-              onSelectAllSessions={() => setSessionFilter((prev: Set<string> | null) => prev === null ? new Set<string>() : null)}
-            />
             <select
               className="version-select version-select-sm"
               value={selectedVersion}
@@ -718,41 +996,77 @@ useEffect(() => {
                     <div className="sc-viewport" style={{ overflow: 'hidden', position: 'relative' }}>
                       <img src={api.screenshotImageUrl(actionScreenshot.id)} className="sc-real-screenshot" alt="" />
                       {actionAnnotation?.found && actionAnnotation.points.map((pt, i) => {
-                        const colors = ['#C73E1D', '#185FA5', '#d97706', '#378ADD']
-                        const color = colors[i % colors.length]
                         const above = pt.y > 50
+                        const pinned = overviewPinnedDot === i
+                        const visible = overviewHoveredDot === i || pinned
+                        const tooltipPos = pt.x < 30
+                          ? { left: 0, transform: 'none' }
+                          : pt.x > 70
+                          ? { right: 0, left: 'auto' as const, transform: 'none' }
+                          : { left: '50%', transform: 'translateX(-50%)' }
                         return (
                           <div
                             key={i}
-                            className="sc-ann-group"
-                            style={{ left: `${pt.x}%`, top: `${pt.y}%` }}
+                            style={{
+                              position: 'absolute',
+                              left: `${pt.x}%`, top: `${pt.y}%`,
+                              transform: 'translate(-50%,-50%)',
+                              zIndex: visible ? 30 : 10,
+                              cursor: 'pointer',
+                            }}
                             onMouseEnter={() => setOverviewHoveredDot(i)}
                             onMouseLeave={() => setOverviewHoveredDot(null)}
+                            onClick={() => setOverviewPinnedDot(p => p === i ? null : i)}
                           >
-                            <div className="sc-ann-dot" style={{ background: color, animationDelay: `${i * 0.12}s` }}>
-                              <div className="sc-ann-pulse" style={{ borderColor: color, animationDelay: `${i * 0.4}s` }} />
-                            </div>
-                            {overviewHoveredDot === i && (
-                              <div style={{
-                                position: 'absolute',
-                                [above ? 'bottom' : 'top']: '100%',
-                                left: '50%',
-                                transform: 'translateX(-50%)',
-                                marginBottom: above ? 6 : 0,
-                                marginTop: above ? 0 : 6,
-                                background: '#0f172a',
-                                color: '#e2e8f0',
-                                border: `1px solid ${color}`,
-                                borderRadius: 6,
-                                padding: '4px 8px',
-                                fontSize: 'var(--fs-small)',
-                                whiteSpace: 'normal' as const,
-                                maxWidth: 220,
-                                zIndex: 10,
-                                pointerEvents: 'none',
-                                lineHeight: 1.4,
-                              }}>
-                                {pt.label}
+                            <GlyphDot
+                              glyph={pt.glyph}
+                              open={pinned}
+                              animationDelay={`${i * 0.12}s`}
+                            />
+                            {/* Card */}
+                            {visible && (
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  ...tooltipPos,
+                                  ...(above ? { bottom: 'calc(100% + 14px)' } : { top: 'calc(100% + 14px)' }),
+                                  width: 270,
+                                  background: '#fff',
+                                  borderRadius: 10,
+                                  border: '1px solid rgba(0,0,0,0.08)',
+                                  boxShadow: '0 12px 32px rgba(0,0,0,0.16), 0 2px 8px rgba(0,0,0,0.08)',
+                                  fontFamily: 'var(--font-sans)',
+                                  zIndex: 50,
+                                  pointerEvents: pinned ? 'auto' : 'none',
+                                  animation: 'dotCardIn 0.15s ease-out',
+                                }}
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <div style={{ padding: '12px 14px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                                  <p style={{
+                                    margin: 0, flex: 1,
+                                    fontSize: '12.5px', lineHeight: 1.6, fontWeight: 500,
+                                    color: '#1e293b', whiteSpace: 'normal',
+                                    wordBreak: 'break-word', overflowWrap: 'anywhere',
+                                  }}>
+                                    {pt.label}
+                                  </p>
+                                  <button
+                                    onClick={e => { e.stopPropagation(); setOverviewPinnedDot(null); setOverviewHoveredDot(null) }}
+                                    style={{
+                                      flexShrink: 0, width: 20, height: 20, borderRadius: 5,
+                                      border: 'none', background: '#f1f5f9', cursor: 'pointer',
+                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                      color: '#94a3b8', transition: 'background 0.12s', marginTop: 1,
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0' }}
+                                    onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9' }}
+                                  >
+                                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                                      <path d="M1 1l6 6M7 1l-6 6"/>
+                                    </svg>
+                                  </button>
+                                </div>
                               </div>
                             )}
                           </div>
@@ -847,29 +1161,16 @@ useEffect(() => {
           <div ref={rightPanelContainerRef} style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
             {/* ── Linked flow diagram + horizon strip (left) ── */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-              {agentJourneySteps.length === 0 && humanJourneySteps.length === 0 ? (
-                <div style={{
-                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  flexDirection: 'column', gap: 12, background: 'var(--bg)',
-                }}>
-                  <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    No flow data yet
-                  </div>
-                  <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', maxWidth: 340, textAlign: 'center', lineHeight: 1.6 }}>
-                    Run an agent or record a human session to see the linked flow + horizon view.
-                  </div>
-                </div>
-              ) : (
-                <SankeyDiagram
-                  agentJourneys={agentJourneySteps}
-                  humanJourneys={humanJourneySteps}
-                  agentLabels={agentLabels}
-                  humanLabels={humanLabels}
-                  onDivergencesChange={setSankeyDivergences}
-                  highlight={activeCompareContext?.highlight}
-                  linkedMode
-                />
-              )}
+              <SankeyDiagram
+                agentJourneys={sharedTaskFilteredAgentJourneySteps}
+                humanJourneys={sharedTaskFilteredHumanJourneySteps}
+                agentLabels={sharedTaskFilteredAgentLabels}
+                humanLabels={sharedTaskFilteredHumanLabels}
+                onDivergencesChange={setSankeyDivergences}
+                highlight={activeCompareContext?.highlight}
+                linkedMode
+                rightControl={filtersControl}
+              />
             </div>
             {/* Draggable divider */}
             <div
@@ -895,40 +1196,41 @@ useEffect(() => {
 
 
 
-        {/* ── AGGREGATE JOURNEYS (SANKEY) ── */}
+        {/* ── AGGREGATE JOURNEYS (Human Steered Agent) ── */}
         {activeView === 'aggregate' && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ padding: '7px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--gray400)', flexShrink: 0 }}>Task</span>
-              <select
-                value={aggregateTaskId ?? ''}
-                onChange={e => setAggregateTaskId(e.target.value === '' ? null : Number(e.target.value))}
-                style={{ fontSize: 'var(--fs-small)', fontWeight: 500, fontFamily: 'var(--font-sans)', padding: '4px 28px 4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', appearance: 'none', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236b7280' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center', minWidth: 160, maxWidth: 280 }}
-              >
-                <option value=''>All tasks</option>
-                {tasks.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
-              </select>
-            </div>
-            {!hasAggData ? (
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, background: 'var(--bg)' }}>
-                <div style={{ textAlign: 'center', maxWidth: 340 }}>
-                  <div style={{ fontSize: 'var(--fs-headline)', marginBottom: 12 }}>🤖</div>
-                  <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>No agent journeys yet</div>
-                  <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 20 }}>Run the AI agent to see the aggregate Sankey flow.</div>
-                  <button className="btn btn-primary" onClick={() => navigate(`/projects/${siteId}/agent-run`)} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5,3 13,8 5,13"/></svg>
-                    Run Agent
-                  </button>
-                </div>
-              </div>
-            ) : (
+          <div ref={rightPanelContainerRef} style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+            {/* Left: flow diagram */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
               <AggregateFlowView
                 siteId={siteId!}
                 siteUrl={siteUrl}
                 taskId={aggregateTaskId ?? undefined}
                 taskTitle={tasks.find(t => t.id === aggregateTaskId)?.title ?? null}
+                hasPrevVersion={hasPrevVersion}
+                prevVersionEndsAt={versionFrom}
+                prevVersionLabel={prevVersionLabel}
+                showHuman={aggShowHuman}
+                showAi={aggShowAi}
+                showPrev={aggShowPrev}
+                rightControl={filtersControl}
               />
-            )}
+            </div>
+            {/* Draggable divider */}
+            <div
+              onMouseDown={startRightPanelDrag}
+              style={{ width: 5, flexShrink: 0, cursor: 'col-resize', background: 'var(--border)', transition: 'background 0.15s' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'var(--border)')}
+            />
+            {/* Right: insights panel */}
+            <div style={{ width: rightPanelW, flexShrink: 0, borderLeft: 'none', overflowY: 'auto', background: 'var(--surface)' }}>
+              <AggregateInsightsPanel
+                compareAnalysis={compareAnalysis}
+                compareLoading={compareLoading}
+                actionContext={activeCompareContext}
+                onClearActionContext={() => setCompareContext(null)}
+              />
+            </div>
           </div>
         )}
 
@@ -949,6 +1251,9 @@ useEffect(() => {
                   humanJourneysBySession={filteredHumanJourneysBySession}
                   loading={humanLoading}
                   tasks={tasks}
+                  taskFilter={heatmapTaskFilter}
+                  onTaskChange={setHeatmapActiveTaskId}
+                  rightControl={filtersControl}
                 />
               )}
             </div>
@@ -957,66 +1262,84 @@ useEffect(() => {
               <HeatmapInsightsPanel
                 compareAnalysis={compareAnalysis}
                 compareLoading={compareLoading}
+                highlightText={heatmapHighlightText}
+                onClearHighlight={() => setHeatmapHighlightText(null)}
+                activeTaskTitle={tasks.find(t => t.id === heatmapActiveTaskId)?.title ?? null}
               />
             </div>
           </div>
         )}
 
-        {/* ── HUMAN VS AI ── */}
-        {activeView === 'human_vs_ai' && (
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            {humanLoading && allHumanSteps.length === 0 ? (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: '#94a3b8', fontSize: 'var(--fs-body)', gap: 8 }}>
-                <span style={{ width: 16, height: 16, border: '2px solid #e2e8f0', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.7s linear infinite', display: 'inline-block' }} />
-                Loading session data…
-              </div>
-            ) : (
-              <ComparePanel
-                agentSteps={allAgentSteps}
-                humanSteps={allHumanSteps}
-                agentJourneys={agentJourneys as api.JourneyResponse[]}
-                humanSessionStepCounts={humanSessionStepCounts}
-                humanSessionCount={visibleSessionCount}
-                actionContext={activeCompareContext}
-                onClearActionContext={() => setCompareContext(null)}
-              />
-            )}
-          </div>
-        )}
-
-        {activeView === 'time_event' && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, background: 'var(--bg)' }}>
-            <div style={{ fontSize: 'var(--fs-headline)' }}>⏱</div>
-            <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>Time-Event-Overview</div>
-            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', maxWidth: 340, textAlign: 'center', lineHeight: 1.6 }}>This view is coming soon. It will show a timeline of events across all sessions.</div>
-          </div>
-        )}
+        {/* ── HUMAN VS AI / OLD VS NEW ── */}
+        {activeView === 'human_vs_ai' && (() => {
+          const legendBar = (
+            <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: '#32494B' }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#32494B' }} />
+                AI
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: '#881342' }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#881342' }} />
+                Human
+              </span>
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>{filtersControl}</div>
+            </div>
+          )
+          return (
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              {compareMode === 'ai_vs_human' ? (
+                humanLoading && sharedTaskFilteredAllHumanSteps.length === 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: '#94a3b8', fontSize: 'var(--fs-body)', gap: 8 }}>
+                    <span style={{ width: 16, height: 16, border: '2px solid #e2e8f0', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.7s linear infinite', display: 'inline-block' }} />
+                    Loading session data…
+                  </div>
+                ) : (
+                  <ComparePanel
+                    agentSteps={sharedTaskFilteredAllAgentSteps}
+                    humanSteps={sharedTaskFilteredAllHumanSteps}
+                    agentJourneys={sharedTaskFilteredAgentJourneys as api.JourneyResponse[]}
+                    humanSessionStepCounts={sharedTaskFilteredHumanSessionStepCounts}
+                    humanSessionCount={visibleSessionCount}
+                    actionContext={activeCompareContext}
+                    onClearActionContext={() => setCompareContext(null)}
+                    topBar={legendBar}
+                  />
+                )
+              ) : (
+                prevVersionAgentSteps.length === 0 && allAgentSteps.length === 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, flexDirection: 'column', gap: 10, color: 'var(--gray400)', fontSize: 'var(--fs-body)' }}>
+                    <span>No agent journeys found for either version.</span>
+                    <span style={{ fontSize: 'var(--fs-small)' }}>Run agents on both versions to compare them.</span>
+                  </div>
+                ) : (
+                  <ComparePanel
+                    agentSteps={prevVersionAgentSteps}
+                    humanSteps={allAgentSteps}
+                    agentJourneys={prevVersionAgentJourneys as api.JourneyResponse[]}
+                    humanSessionStepCounts={agentJourneys.map(j => j.total_steps)}
+                    humanSessionCount={agentJourneys.length}
+                    leftLabel={prevVersionLabel}
+                    rightLabel={activeVersionEntry?.label ?? 'Current Version'}
+                    topBar={legendBar}
+                  />
+                )
+              )}
+            </div>
+          )
+        })()}
 
         {activeView === 'horizon_graph' && (
           <div ref={rightPanelContainerRef} style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
             {/* ── Horizon graph (left) ── */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-              {agentJourneySteps.length === 0 && humanJourneySteps.length === 0 ? (
-                <div style={{
-                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  flexDirection: 'column', gap: 12, background: 'var(--bg)',
-                }}>
-                  <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    No journey data yet
-                  </div>
-                  <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', maxWidth: 340, textAlign: 'center', lineHeight: 1.6 }}>
-                    Run an agent or record a human session to see the horizon graph.
-                  </div>
-                </div>
-              ) : (
-                <HorizonGraph
-                  agentJourneys={agentJourneySteps}
-                  humanJourneys={humanJourneySteps}
-                  agentLabels={agentLabels}
-                  humanLabels={humanLabels}
-                  highlight={activeCompareContext?.highlight}
-                />
-              )}
+              <HorizonGraph
+                agentJourneys={sharedTaskFilteredAgentJourneySteps}
+                humanJourneys={sharedTaskFilteredHumanJourneySteps}
+                agentLabels={sharedTaskFilteredAgentLabels}
+                humanLabels={sharedTaskFilteredHumanLabels}
+                highlight={activeCompareContext?.highlight}
+                rightControl={filtersControl}
+              />
             </div>
             {/* Draggable divider */}
             <div

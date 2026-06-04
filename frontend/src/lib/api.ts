@@ -402,7 +402,7 @@ export function explainHuman(
 }
 
 export interface AnnotationPoint {
-  x: number; y: number; label: string
+  x: number; y: number; label: string; glyph?: string
 }
 
 export interface AnnotateResult {

@@ -36,7 +36,7 @@ Analyse the journeys and respond ONLY with a JSON object (no markdown, no explan
       "calibration_summary": "1-2 sentences: how well-calibrated is the agent on this task? Reference the similarity score if available. Flag as calibration priority if similarity < 0.5 or agent path diverges markedly from humans.",
       "pain_points": [
         {
-          "text": "specific UI/UX issue observed in either agent or human journeys",
+          "text": "one sentence (≤20 words): the specific UI/UX issue, naming the element or URL",
           "type": "ux_issue" | "agent_gap" | "human_issue",
           "agent_explanation": "",
           "human_explanation": "",
@@ -58,30 +58,7 @@ Analyse the journeys and respond ONLY with a JSON object (no markdown, no explan
           ]
         }
       ],
-      "recommendations": [
-        {
-          "text": "concrete, actionable UX fix for the designer",
-          "type": "ux_issue" | "agent_gap" | "human_issue",
-          "agent_explanation": "",
-          "human_explanation": "",
-          "agent_bullets": ["what the agent did differently from humans — ≤12 words, must ref step N or /url", "...", "..."],
-          "human_bullets": ["what humans did naturally (target behaviour) — ≤12 words, must ref step N or /url", "...", "..."],
-          "diagrams": [
-            {
-              "view": "compare",
-              "reason": "one sentence: what this diagram shows that motivates this recommendation",
-              "highlight": {
-                "sections": ["steps_per_page"],
-                "side": "both",
-                "metrics": [],
-                "action_types": [],
-                "pages": ["/target-page"]
-              },
-              "diagram_explanation": "2–3 sentences: explain how the highlighted sections connect to this recommendation, what the user should look for, and why these parts are relevant"
-            }
-          ]
-        }
-      ]
+      "recommendations": []
     }
   ],
   "cross_task_insights": ["pattern or insight that spans multiple tasks", ...],
@@ -97,8 +74,8 @@ Guidelines:
 - Recommendations must be written for a UX designer who will act on them immediately
 - DEDUPLICATION RULE — this is critical: before emitting pain_points and recommendations, scan the full list for near-duplicates. Two items are near-duplicates if they describe the same underlying problem or fix, even in different locations (e.g. "add contact email to footer" and "add contact email to header" both address missing contact visibility — merge them into ONE item: "Make contact email visible in a persistent location (e.g. navigation bar or footer)"). Emit only one representative item per distinct problem or fix.
 - Each pain_point and recommendation must address a clearly distinct UX issue. If you find yourself writing two items that differ only by where on the page something appears, merge them.
-- Aim for 2–5 pain_points and 2–5 recommendations per task. Quality over quantity. If there are less, output less.
-- For diagrams: select 1–3 diagrams per point — every action point MUST link to at least one diagram so the user can verify the evidence. Pick the diagram(s) where the evidence is most directly visible; lead with the single best one. Never pad with diagrams just for completeness, and avoid selecting multiple diagrams that show the same kind of evidence (e.g. "compare" and "insights" both show step counts — pick the better one, not both). If no diagram seems to fit perfectly, still choose the closest one (e.g. "compare" for any effort/efficiency gap, "comparative" to point at the written finding) rather than leaving it empty. Available views and what they show:
+- Output at most 3 pain_points per task — pick only the highest-impact, distinct issues. Each pain_point text must be exactly 1 sentence, ≤20 words, naming the specific element or URL involved. Always output "recommendations": [].
+- For diagrams: select 0–3 diagrams per point — only those where the evidence is most directly visible. If no diagram genuinely shows this issue, use an empty array. Never pad with diagrams just for completeness. Avoid selecting multiple diagrams that show the same kind of evidence (e.g. "compare" and "insights" both show step counts — pick the better one, not both). Available views and what they show:
   * "compare" — side-by-side AI vs Human bar charts: total steps, unique pages visited, action-type breakdown (clicks/scrolls/inputs/backtracks), per-page step counts. Best for: effort differences, efficiency gaps, excessive backtracking, action-type anomalies. When selecting "compare", you MUST also include:
       - "highlight": an object specifying exactly what to highlight in the chart so the user can immediately see the evidence. Fields (omit any field whose value would be empty — do not include empty arrays or irrelevant fields):
           * "sections": array of section names to visually highlight. Valid values: "stats" (the summary metrics grid at top), "action_breakdown" (donut chart of action types), "action_mix" (horizontal bars per action type), "steps_per_page" (bars showing how many steps on each page), "page_revisits" (pages visited more than once — indicates confusion), "session_variance" (box plot of session length distribution), "time_per_action" (time spent per action type)
@@ -109,7 +86,7 @@ Guidelines:
       - "diagram_explanation": 2–3 sentences written for the UX designer that are as precise and data-grounded as possible. Directly reference the specific numbers, ratios, and values the user will see in the highlighted sections (e.g. "The AI took 14 steps on /checkout vs 4 for humans — a 3.5× gap visible in the Steps per Page section"). Connect those concrete numbers to the action point. Explain why the highlighted values constitute evidence for this issue. This text replaces the generic chart description when the user arrives via this action point — it must be immediately useful to a designer looking at the chart.
   * "sankey" — journey milestone flow diagram showing how AI and human journeys progress through navigation stages (start → page load → nav click → detail/done/failed). Link width = steps spent in that transition. For sankey you MUST include a "highlight" object with "side": "ai" when the evidence is about agent journeys, "side": "human" when about human journeys, or "side": "both" when both are relevant. When the action point is about a DIVERGENCE (AI and human, or different runs, taking different paths at some milestone), also set "focus": "divergence" in the highlight — this makes the flow diagram spotlight the exact milestone nodes where journeys split. Best for: wrong turns, detours, dead ends, which journeys reached their goal vs. failed, divergent navigation paths between agent and human.
   * "horizon" — activity-density curve chart; x-axis = relative journey time (0–100%), y-axis = how concentrated activity (clicks, scrolls, inputs, navigation) is at that moment. AI and human journeys are each drawn as an averaged density curve overlaid on the same time axis, with peak markers. For horizon you MUST include a "highlight" object. Set "side": "ai" when the evidence is about agent timing/rhythm (dims the human curve and emphasises the AI curve), "side": "human" when about human timing, or "side": "both" when comparing both. You MAY also add "action_types" (array of "click_element", "input_text", "scroll", "navigate", "extract_content", "other") to overlay an amber band showing WHEN those specific action types are concentrated in the timeline. Best for: comparing WHEN in the journey activity is concentrated, front/back-loaded task patterns, agents that front-load navigation while humans explore gradually, temporal differences in exploration rhythm between AI and human sessions, or pinpointing when a specific action type (e.g. lots of scrolling, repeated clicks) spikes during the journey.
-  * "heatmap" — screenshot overlays with click density (red = many clicks, blue = few). Best for: missed click targets, wrong elements clicked, interaction patterns on a specific page, invisible or hard-to-find UI elements.
+  * "heatmap" — screenshot overlays with click density (red = many clicks, blue = few). Best for: missed click targets, wrong elements clicked, interaction patterns on a specific page, invisible or hard-to-find UI elements. **Only assign this view to visual/click-pattern UX issues** (click target size, element visibility, affordance problems, elements users missed). Do NOT assign `view: heatmap` to JS errors, navigation logic, or non-visual problems.
 
   IMPORTANT: "compare", "sankey", "horizon", and "heatmap" are the ONLY valid values for "view". Do NOT use any other value (no "insights", "comparative", "multiflow", "similarity", "human_agg", or "policy") — those do not exist as linkable diagrams and will produce a broken link.
 - The platform goal is agent calibration: helping UX designers replace human testers with AI agents. Your analysis must distinguish between (a) genuine website UX problems and (b) agent calibration gaps where the agent simply behaves differently from humans.

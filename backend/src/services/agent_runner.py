@@ -247,7 +247,13 @@ async def run_browser_agent(
     browser = Browser(
         # cdp_url="ws://127.0.0.1:9222",
         headless=True,
-        args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        args=[
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            # Force light color scheme so websites render with their light-mode styles
+            "--blink-settings=preferredColorScheme=1",
+        ],
         window_size={'width': 1280, 'height': 800},
         device_scale_factor=1.0,
     )
@@ -275,13 +281,18 @@ async def run_browser_agent(
     steps: list[dict] = []
     history_items = []
 
+    run_start = time.time()
     try:
         history = await agent.run(max_steps=50)
         await status_callback("Processing results...")
         history_items = history.history if hasattr(history, "history") else list(history)
     except Exception as e:
         await status_callback(f"Agent stopped early: {e}")
+    run_end = time.time()
 
+    n_items = sum(1 for item in history_items if hasattr(item, "model_output") and item.model_output is not None)
+
+    _step_idx = 0
     for item in history_items:
         if not hasattr(item, "model_output") or item.model_output is None:
             continue
@@ -340,6 +351,12 @@ async def run_browser_agent(
                 action_details = {**action_details, "text": str(element_text).strip()[:200]}
     
 
+        # Distribute timestamps evenly across the actual wall-clock run duration
+        # so per-step and total-time metrics are meaningful in the dashboard.
+        frac = _step_idx / max(n_items - 1, 1) if n_items > 1 else 0.5
+        step_ts = run_start + frac * (run_end - run_start)
+        _step_idx += 1
+
         step = AgentStepData(
             step_number=len(steps) + 1,
             url=getattr(item.state, "url", "") or "",
@@ -351,7 +368,7 @@ async def run_browser_agent(
             next_goal=getattr(brain, "next_goal", "") or "",
             screenshot_base64=screenshot_b64,
             element_coordinates=coords,
-            timestamp=time.time(),
+            timestamp=step_ts,
         )
 
         step_dict = asdict(step)

@@ -247,9 +247,16 @@ export function getStepsFromSessionEvents(events: EventRow[], siteUrl: string, s
       next_goal: '',
       screenshot_base64: '',
       screenshot_url: screenshotUrl,
+      // Normalise to 0-100% using the actual session viewport so downstream
+      // code can treat human element_coordinates the same as agent ones.
       element_coordinates:
         x !== null && y !== null && width !== null && height !== null
-          ? { x, y, width, height }
+          ? {
+              x: (x / vpW) * 100,
+              y: (y / vpH) * 100,
+              width: (width / vpW) * 100,
+              height: (height / vpH) * 100,
+            }
           : null,
       timestamp: e.timestamp,
     }
@@ -322,13 +329,13 @@ export function getScreenshotsFromSessionSteps(steps: AgentStep[], screenshotMet
       }
 
       // Build annotations from steps that have coordinates
+      // element_coordinates are already normalised to 0-100% by getStepsFromSessionEvents
       const annotations = pageSteps
         .filter(s => s.element_coordinates !== null)
         .map(s => {
           const ec = s.element_coordinates!
-          // Use centre of the element, clamped to [2, 98]% to avoid edge clipping
-          const x = Math.min(98, Math.max(2, ((ec.x + ec.width / 2) / HUMAN_VIEWPORT_W) * 100))
-          const y = Math.min(98, Math.max(2, ((ec.y + ec.height / 2) / HUMAN_VIEWPORT_H) * 100))
+          const x = Math.min(98, Math.max(2, ec.x + ec.width / 2))
+          const y = Math.min(98, Math.max(2, ec.y + ec.height / 2))
           const detail = s.action_details
           const detailStr = typeof detail === 'object' && detail !== null
             ? Object.values(detail).filter(v => typeof v === 'string').slice(0, 1).join('') || ''
@@ -343,6 +350,7 @@ export function getScreenshotsFromSessionSteps(steps: AgentStep[], screenshotMet
         })
 
       // Click heatmap dots for human session
+      // element_coordinates already in 0-100% — use same formula as agent dots
       const heatmapDots: HeatmapDot[] = pageSteps
         .filter(s => s.action_type === 'click_element')
         .flatMap(s => {
@@ -353,8 +361,8 @@ export function getScreenshotsFromSessionSteps(steps: AgentStep[], screenshotMet
           if (s.element_coordinates) {
             const ec = s.element_coordinates
             return [{
-              x: Math.min(98, Math.max(2, ((ec.x + ec.width / 2) / HUMAN_VIEWPORT_W) * 100)),
-              y: Math.min(98, Math.max(2, ((ec.y + ec.height / 2) / HUMAN_VIEWPORT_H) * 100)),
+              x: Math.min(98, Math.max(2, ec.x + ec.width / 2)),
+              y: Math.min(98, Math.max(2, ec.y + ec.height / 2)),
               kind: 'human' as const,
             }]
           }
@@ -387,9 +395,12 @@ function normalizeUrl(url: string): string {
   } catch { return url }
 }
 
+const CLICK_TRIGGERS = new Set(['click', 'click_element', 'select_dropdown', 'select_option'])
+
 export function getAggregatedScreenshots(
   agentJourneys: AgentStep[][],
   humanJourneys: AgentStep[][],
+  journeyScreenshots: import('../../lib/api').ScreenshotMeta[] = [],
 ): ScreenshotData[] {
   // bucket all steps by normalized URL, tracking source kind
   const byPage = new Map<string, { url: string; agentSteps: AgentStep[]; humanSteps: AgentStep[] }>()
@@ -408,13 +419,45 @@ export function getAggregatedScreenshots(
 
   let id = 1
   return Array.from(byPage.values()).map(({ url, agentSteps, humanSteps }) => {
-    // Best screenshot: last agent base64, then last agent screenshot_url, then first human screenshot_url
-    const lastAgentBase64 = [...agentSteps].reverse().find(s => s.screenshot_base64 && s.screenshot_base64.length > 0)
-    const lastAgentUrl = [...agentSteps].reverse().find(s => s.screenshot_url)
-    const firstHumanShot = humanSteps.find(s => s.screenshot_url)
-    const screenshotUrl = lastAgentBase64
-      ? `data:image/png;base64,${lastAgentBase64.screenshot_base64}`
-      : (lastAgentUrl?.screenshot_url ?? firstHumanShot?.screenshot_url)
+    // Best screenshot: use the full journey screenshots list (same source as ActionPointsList)
+    // to prefer a click-trigger image which captures the interactive page state
+    // (e.g. dropdown open, menu expanded) rather than a generic page-load screenshot.
+    let screenshotUrl: string | undefined
+    let screenshotUrls: string[] = []
+
+    if (journeyScreenshots.length > 0) {
+      // Include query string in path so WordPress-style sites (all at /?page_id=X) match correctly
+      const urlPath = (() => {
+        try {
+          const u = new URL(url)
+          return (u.pathname.replace(/\/$/, '') || '/') + u.search
+        } catch { return '/' }
+      })()
+      const pageShots = journeyScreenshots.filter(s => {
+        if (!s.ready || !s.path) return false
+        const sp = (s.path.startsWith('/') ? s.path : '/' + s.path)
+        return sp === urlPath
+      })
+      // Rank: click-triggers first (show interactive state), then by recency
+      const ranked = [
+        ...pageShots.filter(s => CLICK_TRIGGERS.has(s.trigger)).sort((a, b) => (b.created_at_ms ?? 0) - (a.created_at_ms ?? 0)),
+        ...pageShots.filter(s => !CLICK_TRIGGERS.has(s.trigger)).sort((a, b) => (b.created_at_ms ?? 0) - (a.created_at_ms ?? 0)),
+      ]
+      screenshotUrls = ranked.slice(0, 3).map(s => api.screenshotImageUrl(s.id))
+      if (screenshotUrls.length > 0) screenshotUrl = screenshotUrls[0]
+    }
+
+    if (!screenshotUrl) {
+      // Fallback: derive from step data (works for in-flight runs before screenshots are persisted)
+      const reversed = [...agentSteps].reverse()
+      const lastAgentBase64 = reversed.find(s => s.screenshot_base64 && s.screenshot_base64.length > 0)
+      const lastAgentClickUrl = reversed.find(s => isAgentClick(s.action_type) && s.screenshot_url)
+      const lastAgentUrl = lastAgentClickUrl ?? reversed.find(s => s.screenshot_url)
+      const firstHumanShot = humanSteps.find(s => s.screenshot_url)
+      screenshotUrl = lastAgentBase64
+        ? `data:image/png;base64,${lastAgentBase64.screenshot_base64}`
+        : (lastAgentUrl?.screenshot_url ?? firstHumanShot?.screenshot_url)
+    }
 
     // Build annotations from agent step element_coordinates (stored as 0-100% by backend)
     const seen = new Set<string>()
@@ -468,7 +511,8 @@ export function getAggregatedScreenshots(
           }
           if (s.element_coordinates) {
             const ec = s.element_coordinates
-            return [{ x: Math.min(98, Math.max(2, ((ec.x + ec.width / 2) / HUMAN_VIEWPORT_W) * 100)), y: Math.min(98, Math.max(2, ((ec.y + ec.height / 2) / HUMAN_VIEWPORT_H) * 100)), kind: 'human' as const }]
+            // element_coordinates are already normalised to 0-100% by getStepsFromSessionEvents
+            return [{ x: Math.min(98, Math.max(2, ec.x + ec.width / 2)), y: Math.min(98, Math.max(2, ec.y + ec.height / 2)), kind: 'human' as const }]
           }
           return []
         }),
@@ -479,6 +523,7 @@ export function getAggregatedScreenshots(
       pageLabel: shortenPath(url),
       pageUrl: url,
       screenshotUrl,
+      screenshotUrls: screenshotUrls.length > 0 ? screenshotUrls : (screenshotUrl ? [screenshotUrl] : []),
       annotations,
       heatmapDots,
       placeholderSections: screenshotUrl ? [] : DEFAULT_PLACEHOLDER_SECTIONS,

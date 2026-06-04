@@ -1,22 +1,25 @@
-import { useRef, useState, useEffect, useMemo, useCallback } from 'react'
+import { useRef, useState, useEffect, useMemo, useCallback, type ReactNode } from 'react'
 import type { AgentStep } from '../agent/agentTypes'
 
 // ── Layout constants ──────────────────────────────────────────────────────────
-const NODE_W   = 240
-const NODE_H   = 174
-const GAP_X    = 84
-const PAD_X    = 96
-const LANE_GAP = 66
-const Y_TOP    = 34
-const Y_MID    = Y_TOP + NODE_H + LANE_GAP
-const Y_BOT    = Y_MID + NODE_H + LANE_GAP
-const CANVAS_H = Y_BOT + NODE_H + 52
+const NODE_W    = 240
+const NODE_H    = 174
+const GAP_X     = 84
+const PAD_X     = 96
+const LANE_GAP  = 66
+const Y_TOP     = 34
+const Y_MID     = Y_TOP + NODE_H + LANE_GAP
+const Y_BOT     = Y_MID + NODE_H + LANE_GAP
+const Y_PREV    = Y_BOT + NODE_H + LANE_GAP
+const CANVAS_H_3 = Y_BOT  + NODE_H + 52
+const CANVAS_H_4 = Y_PREV + NODE_H + 52
 
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 2.5
 
-const HUMAN_COLOR = '#10b981'
-const AI_COLOR    = '#3b82f6'
+const HUMAN_COLOR = '#881342'
+const AI_COLOR    = '#32494B'
+const PREV_COLOR  = '#6b7280'
 
 // Hamming threshold for "same state": ≤12 bits differ out of 256 (≈95% similarity)
 const HAMMING_THRESHOLD = 12
@@ -76,12 +79,18 @@ function clusterSteps(
 ): Map<AgentStep, string> {
   const result = new Map<AgentStep, string>()
   const representatives: Array<{ hash: string; id: string }> = []
+  let fallbackIdx = 0
 
   for (const step of allSteps) {
     const src = stepSrc(step)
     if (!src) continue
     const hash = hashMap.get(src)
-    if (!hash) continue
+    if (!hash) {
+      // Image failed to load (e.g. file missing after pod restart) — give the step
+      // a unique cluster so it still appears in the layout without cross-matching.
+      result.set(step, `f${fallbackIdx++}`)
+      continue
+    }
 
     let found = false
     for (const rep of representatives) {
@@ -120,7 +129,7 @@ function lcs(a: string[], b: string[]): [number, number][] {
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Lane = 'human' | 'shared' | 'ai'
+type Lane = 'human' | 'shared' | 'ai' | 'prev'
 
 interface LayoutNode {
   id: string
@@ -130,41 +139,57 @@ interface LayoutNode {
   actionLabel: string
   humanStep?: AgentStep
   aiStep?: AgentStep
+  humanStepsAll?: AgentStep[]   // all steps collapsed into this node (consecutive run)
+  aiStepsAll?: AgentStep[]
+  clusterId?: string
+  isLoop?: boolean
+  loopCount?: number            // total times this state was visited in this lane
 }
 
 interface LayoutEdge { fromId: string; toId: string; color: string }
+
+// ── Collapse consecutive same-cluster steps into a single run ─────────────────
+type StepRun = { repr: AgentStep; all: AgentStep[]; cid: string }
+
+function collapseRuns(steps: AgentStep[], clusterMap: Map<AgentStep, string>): StepRun[] {
+  const runs: StepRun[] = []
+  for (const s of steps) {
+    const cid = clusterMap.get(s)
+    if (!cid) continue
+    const last = runs[runs.length - 1]
+    if (last && last.cid === cid) {
+      last.all.push(s)
+    } else {
+      runs.push({ repr: s, all: [s], cid })
+    }
+  }
+  return runs
+}
 
 // ── Layout builder ────────────────────────────────────────────────────────────
 function buildLayout(
   humanSteps: AgentStep[],
   aiSteps: AgentStep[],
   hashMap: Map<string, string>,
+  prevSteps?: AgentStep[],
 ) {
   const h = humanSteps.filter(hasSrc)
   const a = aiSteps.filter(hasSrc)
 
-  // Cluster all steps together so matching states share the same cluster ID
   const clusterMap = clusterSteps([...h, ...a], hashMap)
 
-  const hIds = h.map(s => clusterMap.get(s) ?? '')
-  const aIds = a.map(s => clusterMap.get(s) ?? '')
+  // Collapse consecutive same-cluster steps so the canvas shows 1 card per run
+  const hRuns = collapseRuns(h, clusterMap)
+  const aRuns = collapseRuns(a, clusterMap)
 
-  const pairs = lcs(
-    hIds.filter(id => id !== ''),
-    aIds.filter(id => id !== ''),
-  )
-
-  // Re-align pair indices to the filtered arrays (steps with a cluster ID)
-  const hWithId = h.filter(s => clusterMap.has(s))
-  const aWithId = a.filter(s => clusterMap.has(s))
-  const hCluster = hWithId.map(s => clusterMap.get(s)!)
-  const aCluster = aWithId.map(s => clusterMap.get(s)!)
+  const hCluster = hRuns.map(r => r.cid)
+  const aCluster = aRuns.map(r => r.cid)
   const lcsAligned = lcs(hCluster, aCluster)
 
   const nodes: LayoutNode[] = []
   const edges: LayoutEdge[] = []
 
-  const sentinels: [number, number][] = [[-1, -1], ...lcsAligned, [hWithId.length, aWithId.length]]
+  const sentinels: [number, number][] = [[-1, -1], ...lcsAligned, [hRuns.length, aRuns.length]]
 
   let col = 0
   let prevHumanId: string | null = null
@@ -175,23 +200,41 @@ function buildLayout(
     const [curH, curA]   = sentinels[si]
     const isLast = si === sentinels.length - 1
 
-    const hSeg = hWithId.slice(prevH + 1, curH)
-    const aSeg = aWithId.slice(prevA + 1, curA)
+    const hSeg = hRuns.slice(prevH + 1, curH)
+    const aSeg = aRuns.slice(prevA + 1, curA)
     const segLen = Math.max(hSeg.length, aSeg.length)
 
     for (let i = 0; i < hSeg.length; i++) {
-      const step = hSeg[i]
+      const run = hSeg[i]
       const id = `h-${prevH + 1 + i}`
-      nodes.push({ id, col: col + i, lane: 'human', src: stepSrc(step), actionLabel: step.action_type.replace(/_/g, ' '), humanStep: step })
+      nodes.push({
+        id, col: col + i, lane: 'human',
+        src: stepSrc(run.repr),
+        actionLabel: run.repr.action_type.replace(/_/g, ' '),
+        humanStep: run.repr,
+        humanStepsAll: run.all,
+        clusterId: run.cid,
+        isLoop: run.all.length > 1,
+        loopCount: run.all.length > 1 ? run.all.length : undefined,
+      })
       const fromId = i === 0 ? prevHumanId : `h-${prevH + i}`
       if (fromId) edges.push({ fromId, toId: id, color: HUMAN_COLOR })
     }
     if (hSeg.length > 0) prevHumanId = `h-${prevH + hSeg.length}`
 
     for (let i = 0; i < aSeg.length; i++) {
-      const step = aSeg[i]
+      const run = aSeg[i]
       const id = `a-${prevA + 1 + i}`
-      nodes.push({ id, col: col + i, lane: 'ai', src: stepSrc(step), actionLabel: step.action_type.replace(/_/g, ' '), aiStep: step })
+      nodes.push({
+        id, col: col + i, lane: 'ai',
+        src: stepSrc(run.repr),
+        actionLabel: run.repr.action_type.replace(/_/g, ' '),
+        aiStep: run.repr,
+        aiStepsAll: run.all,
+        clusterId: run.cid,
+        isLoop: run.all.length > 1,
+        loopCount: run.all.length > 1 ? run.all.length : undefined,
+      })
       const fromId = i === 0 ? prevAiId : `a-${prevA + i}`
       if (fromId) edges.push({ fromId, toId: id, color: AI_COLOR })
     }
@@ -200,14 +243,18 @@ function buildLayout(
     col += segLen
 
     if (!isLast) {
-      const hStep = hWithId[curH]
-      const aStep = aWithId[curA]
+      const hRun = hRuns[curH]
+      const aRun = aRuns[curA]
       const id = `shared-${curH}-${curA}`
       nodes.push({
         id, col, lane: 'shared',
-        src: stepSrc(hStep),
-        actionLabel: hStep.action_type.replace(/_/g, ' '),
-        humanStep: hStep, aiStep: aStep,
+        src: stepSrc(hRun.repr),
+        actionLabel: hRun.repr.action_type.replace(/_/g, ' '),
+        humanStep: hRun.repr,
+        humanStepsAll: hRun.all,
+        aiStep: aRun.repr,
+        aiStepsAll: aRun.all,
+        clusterId: hRun.cid,
       })
       if (prevHumanId) edges.push({ fromId: prevHumanId, toId: id, color: HUMAN_COLOR })
       if (prevAiId)    edges.push({ fromId: prevAiId,    toId: id, color: AI_COLOR })
@@ -217,12 +264,82 @@ function buildLayout(
     }
   }
 
+  // Prev policy: linear sequence, no LCS alignment with human/ai
+  if (prevSteps && prevSteps.length > 0) {
+    const p = prevSteps.filter(hasSrc)
+    const prevClusterMap = clusterSteps(p, hashMap)
+    const pRuns = collapseRuns(p, prevClusterMap)
+    let prevPrevId: string | null = null
+    pRuns.forEach((run, i) => {
+      const id = `prev-${i}`
+      nodes.push({
+        id, col: i, lane: 'prev',
+        src: stepSrc(run.repr),
+        actionLabel: run.repr.action_type.replace(/_/g, ' '),
+        humanStep: run.repr,
+        humanStepsAll: run.all,
+        clusterId: run.cid,
+        isLoop: run.all.length > 1,
+        loopCount: run.all.length > 1 ? run.all.length : undefined,
+      })
+      if (prevPrevId) edges.push({ fromId: prevPrevId, toId: id, color: PREV_COLOR })
+      prevPrevId = id
+    })
+    col = Math.max(col, pRuns.length)
+  }
+
+  // Detect non-consecutive loops: same clusterId+lane at multiple positions
+  // Count total step visits and node positions per cluster+lane
+  const laneClusterNodeCount = new Map<string, number>()
+  const laneClusterTotalSteps = new Map<string, number>()
+  for (const n of nodes) {
+    if (!n.clusterId) continue
+    const key = `${n.lane}:${n.clusterId}`
+    laneClusterNodeCount.set(key, (laneClusterNodeCount.get(key) ?? 0) + 1)
+    const visits = n.lane === 'human'
+      ? (n.humanStepsAll?.length ?? 1)
+      : n.lane === 'ai'
+        ? (n.aiStepsAll?.length ?? 1)
+        : Math.max(n.humanStepsAll?.length ?? 1, n.aiStepsAll?.length ?? 1)
+    laneClusterTotalSteps.set(key, (laneClusterTotalSteps.get(key) ?? 0) + visits)
+  }
+  for (const n of nodes) {
+    if (!n.clusterId) continue
+    const key = `${n.lane}:${n.clusterId}`
+    const nodeCount = laneClusterNodeCount.get(key) ?? 1
+    const totalSteps = laneClusterTotalSteps.get(key) ?? 1
+    if (n.isLoop || nodeCount > 1 || totalSteps > 1) {
+      n.isLoop = true
+      n.loopCount = totalSteps
+    }
+  }
+
   return { nodes, edges, totalCols: col }
+}
+
+// ── Loop attribution ─────────────────────────────────────────────────────────
+// For human/ai nodes the lane already tells us who looped.
+// For shared nodes we compare actual step counts on each side.
+function loopAttribution(node: LayoutNode): { who: string; count: number } {
+  if (node.lane === 'human') return { who: 'Human', count: node.loopCount ?? 1 }
+  if (node.lane === 'ai')    return { who: 'AI',    count: node.loopCount ?? 1 }
+  if (node.lane === 'prev')  return { who: 'Prev',  count: node.loopCount ?? 1 }
+  const hV = node.humanStepsAll?.length ?? 1
+  const aV = node.aiStepsAll?.length ?? 1
+  if (hV > 1 && aV > 1) return { who: 'Both',  count: Math.max(hV, aV) }
+  if (aV > 1)           return { who: 'AI',    count: aV }
+  if (hV > 1)           return { who: 'Human', count: hV }
+  return { who: 'Both', count: node.loopCount ?? 1 }
 }
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
 function nodeX(col: number)  { return PAD_X + col * (NODE_W + GAP_X) }
-function nodeY(lane: Lane)   { return lane === 'human' ? Y_TOP : lane === 'shared' ? Y_MID : Y_BOT }
+function nodeY(lane: Lane)   {
+  if (lane === 'human')  return Y_TOP
+  if (lane === 'shared') return Y_MID
+  if (lane === 'prev')   return Y_PREV
+  return Y_BOT
+}
 function nodeCy(lane: Lane)  { return nodeY(lane) + NODE_H / 2 }
 function canvasWidth(cols: number) { return 2 * PAD_X + cols * NODE_W + Math.max(0, cols - 1) * GAP_X }
 
@@ -237,27 +354,42 @@ function arrowPath(fromCol: number, fromLane: Lane, toCol: number, toLane: Lane)
 interface Props {
   humanFlow: AgentStep[] | null
   aiFlow: AgentStep[] | null
+  prevFlow?: AgentStep[] | null
+  showHuman?: boolean
+  showAi?: boolean
+  showPrev?: boolean
+  hasPrevVersion?: boolean
+  prevLabel?: string
   humanLoading?: boolean
   aiLoading?: boolean
+  prevLoading?: boolean
   humanError?: string | null
   aiError?: string | null
+  prevError?: string | null
   humanStatus?: string
   aiStatus?: string
+  prevStatus?: string
   taskTitle?: string | null
   onRunHuman?: () => void
   onStopHuman?: () => void
   onRunAi?: () => void
   onStopAi?: () => void
+  onRunPrev?: () => void
+  onStopPrev?: () => void
+  rightControl?: ReactNode
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function MergedPolicyFlowMap({
-  humanFlow, aiFlow,
-  humanLoading = false, aiLoading = false,
-  humanError = null, aiError = null,
-  humanStatus = '', aiStatus = '',
+  humanFlow, aiFlow, prevFlow = null,
+  showHuman = true, showAi = true, showPrev = true,
+  hasPrevVersion = false, prevLabel = 'Prev Policy',
+  humanLoading = false, aiLoading = false, prevLoading = false,
+  humanError = null, aiError = null, prevError = null,
+  humanStatus = '', aiStatus = '', prevStatus = '',
   taskTitle = null,
-  onRunHuman, onStopHuman, onRunAi, onStopAi,
+  onRunHuman, onStopHuman, onRunAi, onStopAi, onRunPrev, onStopPrev,
+  rightControl,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [panX, setPanX] = useState(60)
@@ -273,11 +405,12 @@ export default function MergedPolicyFlowMap({
   const [hashMap, setHashMap]       = useState<Map<string, string>>(new Map())
   const [hashesReady, setHashesReady] = useState(false)
 
-  // Collect all unique image sources from both flows
+  // Collect all unique image sources from all flows
   const allStepsList = useMemo(() => [
     ...(humanFlow ?? []).filter(hasSrc),
     ...(aiFlow ?? []).filter(hasSrc),
-  ], [humanFlow, aiFlow])
+    ...(prevFlow ?? []).filter(hasSrc),
+  ], [humanFlow, aiFlow, prevFlow])
 
   useEffect(() => {
     const srcs = [...new Set(allStepsList.map(s => stepSrc(s)).filter((s): s is string => !!s))]
@@ -293,11 +426,19 @@ export default function MergedPolicyFlowMap({
     return () => { cancelled = true }
   }, [allStepsList]) // re-run only when actual step list changes
 
+  // Flows filtered by visibility toggles
+  const visHumanFlow = showHuman ? humanFlow : null
+  const visAiFlow    = showAi    ? aiFlow    : null
+  const visPrevFlow  = showPrev  ? prevFlow  : null
+
+  const hasPrevLane = !!(visPrevFlow && visPrevFlow.length > 0)
+  const CANVAS_H = hasPrevLane ? CANVAS_H_4 : CANVAS_H_3
+
   // ── Layout ────────────────────────────────────────────────────────────────
   const { nodes, edges, totalCols } = useMemo(() => {
     if (!hashesReady) return { nodes: [] as LayoutNode[], edges: [] as LayoutEdge[], totalCols: 0 }
-    return buildLayout(humanFlow ?? [], aiFlow ?? [], hashMap)
-  }, [humanFlow, aiFlow, hashMap, hashesReady])
+    return buildLayout(visHumanFlow ?? [], visAiFlow ?? [], hashMap, visPrevFlow ?? undefined)
+  }, [visHumanFlow, visAiFlow, visPrevFlow, hashMap, hashesReady])
 
   const nodeById = useMemo(() => {
     const m = new Map<string, LayoutNode>()
@@ -312,8 +453,26 @@ export default function MergedPolicyFlowMap({
     [nodes],
   )
 
+  // Unique sorted nodes: deduplicate loops so step counter treats revisits as 1 step
+  const uniqueSortedNodes = useMemo(() => {
+    const seen = new Set<string>()
+    return sortedNodes.filter(n => {
+      const key = n.clusterId ? `${n.lane}:${n.clusterId}` : n.id
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }, [sortedNodes])
+
   const selectedNode = selectedNodeId ? nodeById.get(selectedNodeId) ?? null : null
   const selectedIdx  = selectedNode ? sortedNodes.findIndex(n => n.id === selectedNode.id) : -1
+
+  // Unique index for the step counter (loop revisits map back to first occurrence)
+  const selectedUniqueIdx = useMemo(() => {
+    if (!selectedNode) return -1
+    const key = selectedNode.clusterId ? `${selectedNode.lane}:${selectedNode.clusterId}` : selectedNode.id
+    return uniqueSortedNodes.findIndex(n => (n.clusterId ? `${n.lane}:${n.clusterId}` : n.id) === key)
+  }, [selectedNode, uniqueSortedNodes])
 
   // Edge-based adjacency for diverge/converge navigation
   const { forwardMap, backwardMap } = useMemo(() => {
@@ -328,12 +487,19 @@ export default function MergedPolicyFlowMap({
     return { forwardMap: fwd, backwardMap: bwd }
   }, [edges])
 
+  // Deduplicate by node ID: shared→shared edges are emitted twice (one per color) but
+  // should navigate directly without showing the choice panel.
+  function dedup(nodes: (LayoutNode | undefined)[]): LayoutNode[] {
+    const seen = new Set<string>()
+    return nodes.filter((n): n is LayoutNode => !!n && !seen.has(n.id) && (seen.add(n.id), true))
+  }
+
   const nextNodes = useMemo(
-    () => selectedNode ? (forwardMap.get(selectedNode.id)  ?? []).map(id => nodeById.get(id)).filter((n): n is LayoutNode => !!n) : [],
+    () => selectedNode ? dedup((forwardMap.get(selectedNode.id)  ?? []).map(id => nodeById.get(id))) : [],
     [selectedNode, forwardMap, nodeById],
   )
   const prevNodes = useMemo(
-    () => selectedNode ? (backwardMap.get(selectedNode.id) ?? []).map(id => nodeById.get(id)).filter((n): n is LayoutNode => !!n) : [],
+    () => selectedNode ? dedup((backwardMap.get(selectedNode.id) ?? []).map(id => nodeById.get(id))) : [],
     [selectedNode, backwardMap, nodeById],
   )
 
@@ -383,24 +549,24 @@ export default function MergedPolicyFlowMap({
   }, [SVG_W])
 
 
-  const isLoading = humanLoading || aiLoading
-  const isEmpty   = !humanFlow?.length && !aiFlow?.length && !isLoading
+  const isLoading = humanLoading || aiLoading || prevLoading
+  const isEmpty   = !visHumanFlow?.length && !visAiFlow?.length && !visPrevFlow?.length && !isLoading
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--bg)' }}>
 
       {/* ── Header bar ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '8px 14px', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, flexWrap: 'wrap' }}>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ width: 10, height: 10, borderRadius: '50%', background: HUMAN_COLOR, flexShrink: 0 }} />
-          <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: '#0d9488' }}>Human Policy</span>
+          <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: HUMAN_COLOR }}>Human</span>
           {humanLoading
             ? <button onClick={onStopHuman} style={btnStyle(HUMAN_COLOR)}>Stop</button>
             : onRunHuman && <button onClick={onRunHuman} disabled={!taskTitle} style={btnStyle(HUMAN_COLOR, !taskTitle)}>{humanFlow?.length ? 'Re-run' : 'Run'}</button>
           }
           {(humanStatus || humanError) && (
-            <span style={{ fontSize: 'var(--fs-small)', color: humanError ? 'var(--red)' : '#0d9488' }}>
+            <span style={{ fontSize: 'var(--fs-small)', color: humanError ? 'var(--red)' : '#881342' }}>
               {humanLoading && <span className="inline-spinner" style={{ marginRight: 4 }} />}
               {humanError ?? humanStatus}
             </span>
@@ -411,10 +577,10 @@ export default function MergedPolicyFlowMap({
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ width: 10, height: 10, borderRadius: '50%', background: AI_COLOR, flexShrink: 0 }} />
-          <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: '#1d4ed8' }}>AI Policy</span>
+          <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: AI_COLOR }}>AI</span>
           {aiLoading
             ? <button onClick={onStopAi} style={btnStyle(AI_COLOR)}>Stop</button>
-            : onRunAi && <button onClick={onRunAi} disabled={!taskTitle} style={btnStyle(AI_COLOR, !taskTitle)}>{aiFlow?.length ? 'Re-run' : 'Run'}</button>
+            : onRunAi && <button onClick={onRunAi} disabled={!taskTitle} style={btnStyle(AI_COLOR, !taskTitle)}>Run</button>
           }
           {(aiStatus || aiError) && (
             <span style={{ fontSize: 'var(--fs-small)', color: aiError ? 'var(--red)' : AI_COLOR }}>
@@ -424,13 +590,27 @@ export default function MergedPolicyFlowMap({
           )}
         </div>
 
-        <div style={{ flex: 1 }} />
+        {hasPrevVersion && (
+          <>
+            <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0 }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: PREV_COLOR, flexShrink: 0 }} />
+              <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: PREV_COLOR }}>{prevLabel}</span>
+              {prevLoading
+                ? onStopPrev && <button onClick={onStopPrev} style={btnStyle(PREV_COLOR)}>Stop</button>
+                : onRunPrev && <button onClick={onRunPrev} disabled={!taskTitle} style={btnStyle(PREV_COLOR, !taskTitle)}>{prevFlow?.length ? 'Re-run' : 'Run'}</button>
+              }
+              {(prevStatus || prevError) && (
+                <span style={{ fontSize: 'var(--fs-small)', color: prevError ? 'var(--red)' : PREV_COLOR }}>
+                  {prevLoading && <span className="inline-spinner" style={{ marginRight: 4 }} />}
+                  {prevError ?? prevStatus}
+                </span>
+              )}
+            </div>
+          </>
+        )}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>
-          <LegendItem color={HUMAN_COLOR} label="Human policy" />
-          <LegendItem color={AI_COLOR}    label="AI policy" />
-          <LegendItem color="#a855f7"     label="Shared state" isGradient />
-        </div>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>{rightControl}</div>
       </div>
 
       {/* ── Canvas ── */}
@@ -485,7 +665,7 @@ export default function MergedPolicyFlowMap({
             {/* SVG arrows */}
             <svg style={{ position: 'absolute', inset: 0, width: SVG_W, height: CANVAS_H, overflow: 'visible', pointerEvents: 'none' }}>
               <defs>
-                {([['human', HUMAN_COLOR], ['ai', AI_COLOR], ['start', '#64748b']] as const).map(([id, fill]) => (
+                {([['human', HUMAN_COLOR], ['ai', AI_COLOR], ['prev', PREV_COLOR], ['start', '#64748b']] as const).map(([id, fill]) => (
                   <marker key={id} id={`arr-${id}`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
                     <path d="M0 0 L8 4 L0 8Z" fill={fill} />
                   </marker>
@@ -494,20 +674,32 @@ export default function MergedPolicyFlowMap({
 
               {/* START → first column */}
               {nodes.length > 0 && (() => {
-                const firstCol   = nodes.reduce((m, n) => Math.min(m, n.col), Infinity)
-                const firstNodes = nodes.filter(n => n.col === firstCol)
-                const startX     = nodeX(firstCol) - 26
-                return firstNodes.map(fn => {
-                  const color    = fn.lane === 'shared' ? '#64748b' : fn.lane === 'human' ? HUMAN_COLOR : AI_COLOR
-                  const markerId = fn.lane === 'shared' ? 'start' : fn.lane === 'human' ? 'human' : 'ai'
-                  return (
-                    <line key={fn.id}
-                      x1={startX} y1={nodeCy(fn.lane)}
-                      x2={nodeX(firstCol) - 4} y2={nodeCy(fn.lane)}
-                      stroke={color} strokeWidth="2.5" markerEnd={`url(#arr-${markerId})`}
+                // Non-prev nodes share the same LCS column space; prev nodes start at col 0 independently
+                const mainNodes = nodes.filter(n => n.lane !== 'prev')
+                const firstCol   = mainNodes.length > 0 ? mainNodes.reduce((m, n) => Math.min(m, n.col), Infinity) : Infinity
+                const firstNodes = mainNodes.filter(n => n.col === firstCol)
+                const prevFirstNode = nodes.find(n => n.lane === 'prev')
+                const startX = nodeX(firstCol !== Infinity ? firstCol : 0) - 26
+                return [
+                  ...firstNodes.map(fn => {
+                    const color    = fn.lane === 'shared' ? '#64748b' : fn.lane === 'human' ? HUMAN_COLOR : AI_COLOR
+                    const markerId = fn.lane === 'shared' ? 'start' : fn.lane === 'human' ? 'human' : 'ai'
+                    return (
+                      <line key={fn.id}
+                        x1={startX} y1={nodeCy(fn.lane)}
+                        x2={nodeX(firstCol) - 4} y2={nodeCy(fn.lane)}
+                        stroke={color} strokeWidth="2.5" markerEnd={`url(#arr-${markerId})`}
+                      />
+                    )
+                  }),
+                  prevFirstNode && (
+                    <line key="prev-start"
+                      x1={nodeX(0) - 26} y1={nodeCy('prev')}
+                      x2={nodeX(0) - 4}  y2={nodeCy('prev')}
+                      stroke={PREV_COLOR} strokeWidth="2.5" markerEnd="url(#arr-prev)"
                     />
-                  )
-                })
+                  ),
+                ]
               })()}
 
               {/* Edges */}
@@ -515,7 +707,7 @@ export default function MergedPolicyFlowMap({
                 const from = nodeById.get(edge.fromId)
                 const to   = nodeById.get(edge.toId)
                 if (!from || !to) return null
-                const markerId = edge.color === HUMAN_COLOR ? 'human' : 'ai'
+                const markerId = edge.color === HUMAN_COLOR ? 'human' : edge.color === PREV_COLOR ? 'prev' : 'ai'
                 return (
                   <path key={i}
                     d={arrowPath(from.col, from.lane, to.col, to.lane)}
@@ -527,19 +719,33 @@ export default function MergedPolicyFlowMap({
 
             </svg>
 
-            {/* START pill */}
+            {/* START pills */}
             {nodes.length > 0 && (() => {
-              const firstCol  = nodes.reduce((m, n) => Math.min(m, n.col), Infinity)
-              const firstNode = nodes.find(n => n.col === firstCol)!
-              const sx = nodeX(firstCol) - 74
+              const mainNodes = nodes.filter(n => n.lane !== 'prev')
+              const firstCol  = mainNodes.length > 0 ? mainNodes.reduce((m, n) => Math.min(m, n.col), Infinity) : -1
+              const firstNode = firstCol >= 0 ? mainNodes.find(n => n.col === firstCol) : null
+              const prevFirstNode = nodes.find(n => n.lane === 'prev')
               return (
-                <div style={{
-                  position: 'absolute', left: sx, top: nodeCy(firstNode.lane) - 15,
-                  width: 60, height: 30, background: '#0f172a', color: '#fff',
-                  borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 10, fontWeight: 900, letterSpacing: '0.08em',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-                }}>START</div>
+                <>
+                  {firstNode && (
+                    <div style={{
+                      position: 'absolute', left: nodeX(firstCol) - 74, top: nodeCy(firstNode.lane) - 15,
+                      width: 60, height: 30, background: '#0f172a', color: '#fff',
+                      borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 10, fontWeight: 900, letterSpacing: '0.08em',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                    }}>START</div>
+                  )}
+                  {prevFirstNode && (
+                    <div style={{
+                      position: 'absolute', left: nodeX(0) - 74, top: nodeCy('prev') - 15,
+                      width: 60, height: 30, background: PREV_COLOR, color: '#fff',
+                      borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 10, fontWeight: 900, letterSpacing: '0.08em',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                    }}>START</div>
+                  )}
+                </>
               )
             })()}
 
@@ -586,8 +792,8 @@ export default function MergedPolicyFlowMap({
           node={selectedNode}
           prevNodes={prevNodes}
           nextNodes={nextNodes}
-          totalCount={sortedNodes.length}
-          currentIdx={selectedIdx}
+          totalCount={uniqueSortedNodes.length}
+          currentIdx={selectedUniqueIdx}
           onClose={() => setSelectedNodeId(null)}
           onNavigate={id => setSelectedNodeId(id)}
         />
@@ -601,11 +807,13 @@ function NodeCard({ node, isSelected, onClick }: { node: LayoutNode; isSelected:
   const x = nodeX(node.col)
   const y = nodeY(node.lane)
 
-  const borderColor = node.lane === 'shared' ? '#a855f7' : node.lane === 'human' ? HUMAN_COLOR : AI_COLOR
-  const badgeLabel  = node.lane === 'shared' ? '⟷ shared' : node.lane === 'human' ? 'human' : 'AI'
+  const borderColor = node.isLoop
+    ? '#f59e0b'
+    : node.lane === 'shared' ? '#a855f7' : node.lane === 'human' ? HUMAN_COLOR : node.lane === 'prev' ? PREV_COLOR : AI_COLOR
+  const badgeLabel  = node.lane === 'shared' ? '⟷ shared' : node.lane === 'human' ? 'human' : node.lane === 'prev' ? 'prev' : 'AI'
   const badgeBg     = node.lane === 'shared'
     ? 'linear-gradient(135deg, #10b981, #3b82f6)'
-    : node.lane === 'human' ? HUMAN_COLOR : AI_COLOR
+    : node.lane === 'human' ? HUMAN_COLOR : node.lane === 'prev' ? PREV_COLOR : AI_COLOR
 
   const thumbH = NODE_H - 36
 
@@ -647,6 +855,27 @@ function NodeCard({ node, isSelected, onClick }: { node: LayoutNode; isSelected:
           fontSize: 9, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase',
           boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
         }}>{badgeLabel}</div>
+        {node.isLoop && (() => {
+          const { who, count } = loopAttribution(node)
+          return (
+            <div style={{
+              position: 'absolute', top: 6, right: 6,
+              background: 'rgba(245,158,11,0.92)', color: '#fff',
+              borderRadius: 4, padding: '2px 6px',
+              fontSize: 9, fontWeight: 800, letterSpacing: '0.04em',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+              display: 'flex', alignItems: 'center', gap: 3,
+            }}>
+              <svg width="9" height="9" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13 2v4h-4"/>
+                <path d="M1 12v-4h4"/>
+                <path d="M11.8 7a5 5 0 0 0-8.6-2.7L1 7"/>
+                <path d="M2.2 7a5 5 0 0 0 8.6 2.7L13 7"/>
+              </svg>
+              {who} ×{count}
+            </div>
+          )
+        })()}
       </div>
       {/* Footer */}
       <div style={{ height: 36, padding: '0 10px', display: 'flex', alignItems: 'center', borderTop: '1px solid #f1f5f9', background: '#fff', gap: 6 }}>
@@ -724,15 +953,25 @@ function NodeModal({ node, prevNodes, nextNodes, totalCount, currentIdx, onClose
     return () => window.removeEventListener('keydown', onKey)
   }, [handleNext, handlePrev, confirmChoice, choiceDir, choiceIdx, nextNodes, prevNodes, onClose])
 
-  const renderStep = (step: AgentStep, label: string, color: string) => {
+  const renderStep = (step: AgentStep, allSteps: AgentStep[] | undefined, label: string, color: string) => {
     const img = stepSrc(step)
     let path = step.url
     try { path = new URL(step.url).pathname || '/' } catch { /* ok */ }
+    const messages = allSteps && allSteps.length > 0 ? allSteps : [step]
     return (
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '7px 14px', background: `${color}12`, borderBottom: `2px solid ${color}`, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
           <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color }}>{label}</span>
+          {messages.length > 1 && (
+            <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 800, color, background: `${color}18`, borderRadius: 4, padding: '1px 6px', display: 'flex', alignItems: 'center', gap: 3 }}>
+              <svg width="8" height="8" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13 2v4h-4"/><path d="M1 12v-4h4"/>
+                <path d="M11.8 7a5 5 0 0 0-8.6-2.7L1 7"/><path d="M2.2 7a5 5 0 0 0 8.6 2.7L13 7"/>
+              </svg>
+              ×{messages.length} visits
+            </span>
+          )}
         </div>
         <div style={{ flex: 1, background: '#fff', overflow: 'hidden', position: 'relative', minHeight: 0 }}>
           {img
@@ -740,16 +979,28 @@ function NodeModal({ node, prevNodes, nextNodes, totalCount, currentIdx, onClose
             : <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>No screenshot</div>
           }
         </div>
-        <div style={{ padding: '8px 14px', borderTop: `1px solid ${color}30`, background: '#fafafa', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: '#374151' }}>{step.action_type.replace(/_/g, ' ')}</span>
-            <span style={{ fontSize: 'var(--fs-small)', color: '#9ca3af', fontFamily: 'var(--font-sans)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>{path}</span>
-          </div>
-          {step.thought && (
-            <div style={{ fontSize: 'var(--fs-small)', color: '#9ca3af', fontStyle: 'italic', lineHeight: 1.4, marginTop: 3 }}>
-              {step.thought.slice(0, 160)}{step.thought.length > 160 ? '…' : ''}
-            </div>
-          )}
+        {/* Scrollable message history */}
+        <div style={{ maxHeight: 160, overflowY: 'auto', borderTop: `1px solid ${color}30`, background: '#fafafa', flexShrink: 0 }}>
+          {messages.map((s, idx) => {
+            let spath = s.url
+            try { spath = new URL(s.url).pathname || '/' } catch { /* ok */ }
+            return (
+              <div key={idx} style={{ padding: '7px 14px', borderBottom: idx < messages.length - 1 ? `1px solid ${color}14` : undefined }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                  {messages.length > 1 && (
+                    <span style={{ fontSize: 9, fontWeight: 800, color: `${color}99`, flexShrink: 0, minWidth: 16 }}>#{idx + 1}</span>
+                  )}
+                  <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: '#374151' }}>{s.action_type.replace(/_/g, ' ')}</span>
+                  <span style={{ fontSize: 'var(--fs-small)', color: '#9ca3af', fontFamily: 'var(--font-sans)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{spath}</span>
+                </div>
+                {s.thought && (
+                  <div style={{ fontSize: 'var(--fs-small)', color: '#6b7280', fontStyle: 'italic', lineHeight: 1.4, marginTop: 3 }}>
+                    {s.thought}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
     )
@@ -778,8 +1029,17 @@ function NodeModal({ node, prevNodes, nextNodes, totalCount, currentIdx, onClose
           <span style={{ fontSize: 'var(--fs-small)', fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>{currentIdx + 1} / {totalCount}</span>
           <button disabled={nextNodes.length === 0} onClick={handleNext} title="Next (→)" style={navBtnStyle(nextNodes.length === 0)}>→</button>
 
-          <div style={{ flex: 1, fontSize: 'var(--fs-body)', fontWeight: 700, color: '#111827', textAlign: 'center' }}>
+          <div style={{ flex: 1, fontSize: 'var(--fs-body)', fontWeight: 700, color: '#111827', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             {isShared ? 'Shared State' : node.lane === 'human' ? 'Human Policy Step' : 'AI Policy Step'}
+            {node.isLoop && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: '#f59e0b', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 6, padding: '2px 8px' }}>
+                <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M13 2v4h-4"/><path d="M1 12v-4h4"/>
+                  <path d="M11.8 7a5 5 0 0 0-8.6-2.7L1 7"/><path d="M2.2 7a5 5 0 0 0 8.6 2.7L13 7"/>
+                </svg>
+                {loopAttribution(node).who} loop · ×{loopAttribution(node).count}
+              </span>
+            )}
           </div>
 
           <span style={{ fontSize: 'var(--fs-small)', color: '#9ca3af', whiteSpace: 'nowrap' }}>{choiceDir ? '↑ ↓ to choose · Enter to confirm' : '← → to navigate'}</span>
@@ -789,10 +1049,14 @@ function NodeModal({ node, prevNodes, nextNodes, totalCount, currentIdx, onClose
         {/* Content */}
         <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
           {isShared
-            ? (node.aiStep ?? node.humanStep) && renderStep((node.aiStep ?? node.humanStep)!, 'Shared State', '#a855f7')
+            ? (node.aiStep ?? node.humanStep) && renderStep(
+                (node.aiStep ?? node.humanStep)!,
+                node.aiStepsAll ?? node.humanStepsAll,
+                'Shared State', '#a855f7'
+              )
             : <>
-                {node.humanStep && renderStep(node.humanStep, 'Human Policy', HUMAN_COLOR)}
-                {node.aiStep    && renderStep(node.aiStep,    'AI Policy',    AI_COLOR)}
+                {node.humanStep && renderStep(node.humanStep, node.humanStepsAll, 'Human Policy', HUMAN_COLOR)}
+                {node.aiStep    && renderStep(node.aiStep,    node.aiStepsAll,    'AI Policy',    AI_COLOR)}
               </>
           }
         </div>
@@ -812,8 +1076,8 @@ function ChoicePanel({ nodes, label, selectedIdx, onClick }: { nodes: LayoutNode
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: 174, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
       <div style={{ fontSize: 10, fontWeight: 800, color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingLeft: 2 }}>{label}</div>
       {nodes.map((n, i) => {
-        const color = n.lane === 'human' ? HUMAN_COLOR : n.lane === 'shared' ? '#a855f7' : AI_COLOR
-        const policyLabel = n.lane === 'human' ? 'Human Policy' : n.lane === 'shared' ? 'Shared' : 'AI Policy'
+        const color = n.lane === 'human' ? HUMAN_COLOR : n.lane === 'shared' ? '#a855f7' : n.lane === 'prev' ? PREV_COLOR : AI_COLOR
+        const policyLabel = n.lane === 'human' ? 'Human Policy' : n.lane === 'shared' ? 'Shared' : n.lane === 'prev' ? 'Prev Policy' : 'AI Policy'
         const isActive = i === selectedIdx
         return (
           <div
@@ -852,15 +1116,6 @@ function ChoicePanel({ nodes, label, selectedIdx, onClick }: { nodes: LayoutNode
 }
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
-function LegendItem({ color, label, isGradient }: { color: string; label: string; isGradient?: boolean }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-      <div style={{ width: 24, height: 3, borderRadius: 2, background: isGradient ? `linear-gradient(90deg, ${HUMAN_COLOR}, ${AI_COLOR})` : color }} />
-      <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-muted)', fontWeight: 500 }}>{label}</span>
-    </div>
-  )
-}
-
 function btnStyle(color: string, disabled = false): React.CSSProperties {
   return {
     fontSize: 11, fontWeight: 700, padding: '3px 10px',

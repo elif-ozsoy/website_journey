@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, type ReactNode } from 'react'
 import * as d3 from 'd3'
 import type { AgentStep } from '../agent/agentTypes'
 import type { CompareHighlight } from '../../lib/api'
@@ -10,6 +10,7 @@ interface Props {
   agentLabels?: string[]
   humanLabels?: string[]
   highlight?: CompareHighlight
+  rightControl?: ReactNode
 }
 
 const AGENT_COLOR = '#32494B'
@@ -45,13 +46,11 @@ function actionTypeDensity(journeySteps: AgentStep[][], types: string[]): number
  * ────────────────────────────────────────────────────────────────────────── */
 
 function OverlayDensityChart({
-  agentDensity, humanDensity, agentCount, humanCount,
+  agentDensity, humanDensity,
   focusKind, actionHighlightDensity, width,
 }: {
   agentDensity: number[]
   humanDensity: number[]
-  agentCount: number
-  humanCount: number
   focusKind: 'agent' | 'human' | null
   actionHighlightDensity: number[] | null
   width: number
@@ -105,27 +104,7 @@ function OverlayDensityChart({
   return (
     <div style={{ position: 'relative', flexShrink: 0 }}>
       {/* Legend */}
-      <div style={{
-        position: 'absolute', top: CHART_PAD.top + 8, right: CHART_PAD.right + 10,
-        display: 'flex', gap: 14, alignItems: 'center', pointerEvents: 'none', zIndex: 1,
-      }}>
-        {hasAgent && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, opacity: agentDim ? 0.35 : 1, transition: 'opacity 0.2s' }}>
-            <span style={{ width: 14, height: 3, background: AGENT_COLOR, borderRadius: 2, display: 'inline-block' }} />
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: AGENT_COLOR, fontFamily: 'Inter, system-ui, sans-serif' }}>
-              AI ({agentCount})
-            </span>
-          </div>
-        )}
-        {hasHuman && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, opacity: humanDim ? 0.35 : 1, transition: 'opacity 0.2s' }}>
-            <span style={{ width: 14, height: 3, background: HUMAN_COLOR, borderRadius: 2, display: 'inline-block' }} />
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: HUMAN_COLOR, fontFamily: 'Inter, system-ui, sans-serif' }}>
-              Human ({humanCount})
-            </span>
-          </div>
-        )}
-      </div>
+      <div />
 
       <svg width={width} height={CHART_H} style={{ display: 'block' }}>
         <g transform={`translate(${CHART_PAD.left + Y_AXIS_W},${CHART_PAD.top})`}>
@@ -251,11 +230,8 @@ function OverlayDensityChart({
  * ────────────────────────────────────────────────────────────────────────── */
 
 export default function HorizonGraph({
-  agentJourneys, humanJourneys = [], agentLabels, humanLabels, highlight,
+  agentJourneys, humanJourneys = [], agentLabels, humanLabels, highlight, rightControl,
 }: Props) {
-  type KindFilter = 'both' | 'agent' | 'human'
-  const [kindFilter, setKindFilter] = useState<KindFilter>('both')
-
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerW, setContainerW] = useState(800)
   useEffect(() => {
@@ -266,12 +242,6 @@ export default function HorizonGraph({
     setContainerW(el.clientWidth)
     return () => ro.disconnect()
   }, [])
-
-  /* Sync kindFilter to highlight.side when a new highlight arrives */
-  useEffect(() => {
-    if (!highlight?.side || highlight.side === 'both') return
-    setKindFilter(highlight.side === 'ai' ? 'agent' : 'human')
-  }, [highlight])
 
   const allAgentSteps = agentJourneys
   const allHumanSteps = humanJourneys
@@ -285,13 +255,16 @@ export default function HorizonGraph({
     [allHumanSteps],
   )
 
+  const focusKind: 'agent' | 'human' | null =
+    highlight?.side === 'ai' ? 'agent' : highlight?.side === 'human' ? 'human' : null
+
   const avgAgentDensity = useMemo(
-    () => averageDensities(kindFilter === 'human' ? [] : agentDensities),
-    [agentDensities, kindFilter],
+    () => averageDensities(focusKind === 'human' ? [] : agentDensities),
+    [agentDensities, focusKind],
   )
   const avgHumanDensity = useMemo(
-    () => averageDensities(kindFilter === 'agent' ? [] : humanDensities),
-    [humanDensities, kindFilter],
+    () => averageDensities(focusKind === 'agent' ? [] : humanDensities),
+    [humanDensities, focusKind],
   )
 
   /* Action-type highlight density — only when highlight.action_types is set */
@@ -304,12 +277,7 @@ export default function HorizonGraph({
     return actionTypeDensity(journeysToUse, types)
   }, [highlight, allAgentSteps, allHumanSteps])
 
-  const focusKind: 'agent' | 'human' | null =
-    highlight?.side === 'ai' ? 'agent' : highlight?.side === 'human' ? 'human' : null
-
-  const agentCount = agentJourneys.length
-  const humanCount = humanJourneys.length
-  const hasData = agentCount + humanCount > 0
+  const hasData = agentJourneys.length + humanJourneys.length > 0
   const chartSvgW = Math.max(200, containerW - 40)
 
   return (
@@ -321,53 +289,36 @@ export default function HorizonGraph({
 
       {/* ── Header ── */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        flexShrink: 0, flexWrap: 'wrap', gap: 8, marginBottom: 12,
+        display: 'flex', alignItems: 'center', gap: 12,
+        flexShrink: 0, flexWrap: 'wrap', marginBottom: 10,
       }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>
-              Activity density over journey time
-            </div>
-            {focusKind && (
-              <span style={{
-                fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
-                background: focusKind === 'agent' ? `${AGENT_COLOR}18` : `${HUMAN_COLOR}18`,
-                color: focusKind === 'agent' ? AGENT_COLOR : HUMAN_COLOR,
-                border: `1px solid ${focusKind === 'agent' ? AGENT_COLOR : HUMAN_COLOR}`,
-              }}>
-                {focusKind === 'agent' ? 'AI journeys highlighted' : 'Human journeys highlighted'}
-              </span>
-            )}
-            {actionHighlightDensity && highlight?.action_types && (
-              <span style={{
-                fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
-                background: '#fef3c7', color: '#92400e', border: '1px solid #f59e0b',
-              }}>
-                {highlight.action_types.map(t => t.replace(/_/g, ' ')).join(', ')} highlighted
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: '0.7rem', color: TEXT_MUTED, marginTop: 2 }}>
-            Average action density across all journeys
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {(['both', 'agent', 'human'] as KindFilter[]).map(k => {
-            const active = kindFilter === k
-            const lbl = k === 'both' ? 'All' : k === 'agent' ? 'AI only' : 'Humans only'
-            const col = k === 'agent' ? AGENT_COLOR : k === 'human' ? HUMAN_COLOR : '#475569'
-            return (
-              <button key={k} onClick={() => setKindFilter(k)} style={{
-                padding: '4px 10px', borderRadius: 4, fontFamily: 'inherit',
-                fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer',
-                border: `1px solid ${active ? col : BORDER}`,
-                background: active ? col : '#fff',
-                color: active ? '#fff' : TEXT_LABEL,
-              }}>{lbl}</button>
-            )
-          })}
-        </div>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: AGENT_COLOR }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: AGENT_COLOR }} />
+          AI
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: HUMAN_COLOR }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: HUMAN_COLOR }} />
+          Human
+        </span>
+        {focusKind && (
+          <span style={{
+            fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+            background: focusKind === 'agent' ? `${AGENT_COLOR}18` : `${HUMAN_COLOR}18`,
+            color: focusKind === 'agent' ? AGENT_COLOR : HUMAN_COLOR,
+            border: `1px solid ${focusKind === 'agent' ? AGENT_COLOR : HUMAN_COLOR}`,
+          }}>
+            {focusKind === 'agent' ? 'AI journeys highlighted' : 'Human journeys highlighted'}
+          </span>
+        )}
+        {actionHighlightDensity && highlight?.action_types && (
+          <span style={{
+            fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+            background: '#fef3c7', color: '#92400e', border: '1px solid #f59e0b',
+          }}>
+            {highlight.action_types.map(t => t.replace(/_/g, ' ')).join(', ')} highlighted
+          </span>
+        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>{rightControl}</div>
       </div>
 
       {/* ── Chart ── */}
@@ -375,8 +326,6 @@ export default function HorizonGraph({
         <OverlayDensityChart
           agentDensity={avgAgentDensity}
           humanDensity={avgHumanDensity}
-          agentCount={agentCount}
-          humanCount={humanCount}
           focusKind={focusKind}
           actionHighlightDensity={actionHighlightDensity}
           width={chartSvgW}

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
+import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react'
 import * as d3 from 'd3'
 import { createPortal } from 'react-dom'
 import { sankey as d3Sankey, sankeyLinkHorizontal } from 'd3-sankey'
@@ -21,6 +21,7 @@ interface Props {
   /* When true, dock a per-journey horizon strip beneath the diagram and switch
    * the click gesture to "pin" (double-click still opens the detail modal). */
   linkedMode?: boolean
+  rightControl?: ReactNode
 }
 
 /* ── Color tokens ──
@@ -833,6 +834,7 @@ export default function SankeyDiagram({
   onDivergencesChange,
   highlight,
   linkedMode = false,
+  rightControl,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -854,31 +856,7 @@ export default function SankeyDiagram({
 
   const journeyMap = useMemo(() => new Map(journeys.map(j => [j.id, j])), [journeys])
 
-  const showOnlyKind = useCallback((kind: 'agent' | 'human') => {
-    setHiddenJourneyIds(() => {
-      const nextHidden = new Set<string>()
-      // Hide anything that DOES NOT match the kind we want to see
-      journeys.forEach(j => {
-        if (j.kind !== kind) {
-          nextHidden.add(j.id)
-        }
-      })
-      return nextHidden
-    })
-  }, [journeys])
-
-  const showAllRuns = useCallback(() => {
-    // Clear out the hidden set entirely to make everything visible
-    setHiddenJourneyIds(new Set())
-  }, [])
-
-  /* Visibility toggles: clicking a legend item adds/removes from this set.
-   * Hidden runs are excluded from graph construction entirely. */
-  const [hiddenJourneyIds, setHiddenJourneyIds] = useState<Set<string>>(new Set())
-  const visibleJourneys = useMemo(
-    () => journeys.filter(j => !hiddenJourneyIds.has(j.id)),
-    [journeys, hiddenJourneyIds],
-  )
+  const visibleJourneys = journeys
 
   const graph = useMemo(() => buildGraph(visibleJourneys), [visibleJourneys])
 
@@ -1314,22 +1292,6 @@ export default function SankeyDiagram({
     svg.selectAll('rect').attr('opacity', 1)
   }, [hoverJourneyId, pinnedJourneyId, highlight, journeyMap, hasData, divergentNodeIds])
 
-  const onLegendClick = useCallback((id: string) => {
-    setHiddenJourneyIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }, [])
-
-  const onLegendHover = useCallback((id: string | null) => {
-    setHoverJourneyId(id)
-  }, [])
-
-  const allHidden = hiddenJourneyIds.size === journeys.length && journeys.length > 0
-  const someHidden = hiddenJourneyIds.size > 0 && !allHidden
-
   /* The journey whose horizon strip is shown: the hovered flow, or the pinned
    * one when nothing is hovered. */
   const activeJourney = useMemo<ActiveJourney | null>(() => {
@@ -1359,62 +1321,34 @@ export default function SankeyDiagram({
     }}>
       {/* Header */}
       <div style={{ marginBottom: 8, flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>
-              Journey milestones
-            </div>
-            {highlight?.side && highlight.side !== 'both' && (
-              <span style={{
-                fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
-                background: highlight.side === 'ai' ? `${AGENT_COLOR}18` : `${HUMAN_COLOR}18`,
-                color: highlight.side === 'ai' ? AGENT_COLOR : HUMAN_COLOR,
-                border: `1px solid ${highlight.side === 'ai' ? AGENT_COLOR : HUMAN_COLOR}`,
-              }}>
-                {highlight.side === 'ai' ? 'AI journeys highlighted' : 'Human journeys highlighted'}
-              </span>
-            )}
-            {highlight?.focus === 'divergence' && divergentNodeIds.size > 0 && (
-              <span style={{
-                fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
-                background: '#fef3c7', color: '#b45309', border: '1px solid #f59e0b',
-              }}>
-                ⚡ Divergence points highlighted
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: TEXT_MUTED }}>
-            {agentJourneys.length} agent · {humanJourneys.length} human · link width = steps spent · {linkedMode ? 'hover a flow for its timeline · click to pin · double-click to inspect' : 'hover for detail · click flow to inspect run'}
-          </div>
-        </div>
-        {/* Filter buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button
-            onClick={() => showOnlyKind('agent')}
-            style={{
-              padding: '2px 8px', fontSize: '0.67rem', fontWeight: 600,
-              borderRadius: 99, cursor: 'pointer', border: `1px solid ${AGENT_COLOR}`,
-              background: `${AGENT_COLOR}18`, color: AGENT_COLOR, fontFamily: 'inherit',
-            }}
-          >AI Only</button>
-          <button
-            onClick={() => showOnlyKind('human')}
-            style={{
-              padding: '2px 8px', fontSize: '0.67rem', fontWeight: 600,
-              borderRadius: 99, cursor: 'pointer', border: `1px solid ${HUMAN_COLOR}`,
-              background: `${HUMAN_COLOR}18`, color: HUMAN_COLOR, fontFamily: 'inherit',
-            }}
-          >Human Only</button>
-          {(someHidden || allHidden) && (
-            <button
-              onClick={showAllRuns}
-              style={{
-                padding: '2px 8px', fontSize: '0.67rem', fontWeight: 600,
-                borderRadius: 99, cursor: 'pointer', border: '1px solid #cbd5e1',
-                background: '#fff', color: TEXT_DARK, fontFamily: 'inherit',
-              }}
-            >Show All</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: AGENT_COLOR }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: AGENT_COLOR }} />
+            AI
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: HUMAN_COLOR }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: HUMAN_COLOR }} />
+            Human
+          </span>
+          {highlight?.side && highlight.side !== 'both' && (
+            <span style={{
+              fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+              background: highlight.side === 'ai' ? `${AGENT_COLOR}18` : `${HUMAN_COLOR}18`,
+              color: highlight.side === 'ai' ? AGENT_COLOR : HUMAN_COLOR,
+              border: `1px solid ${highlight.side === 'ai' ? AGENT_COLOR : HUMAN_COLOR}`,
+            }}>
+              {highlight.side === 'ai' ? 'AI journeys highlighted' : 'Human journeys highlighted'}
+            </span>
           )}
+          {highlight?.focus === 'divergence' && divergentNodeIds.size > 0 && (
+            <span style={{
+              fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+              background: '#fef3c7', color: '#b45309', border: '1px solid #f59e0b',
+            }}>
+              ⚡ Divergence points highlighted
+            </span>
+          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>{rightControl}</div>
         </div>
       </div>
 

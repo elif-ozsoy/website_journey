@@ -42,6 +42,14 @@ def init_db() -> None:
     if "action_id" not in screenshot_columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE screenshots ADD COLUMN action_id VARCHAR(64)"))
+    if "data" not in screenshot_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE screenshots ADD COLUMN data BYTEA"))
+
+    site_columns = {col["name"] for col in inspector.get_columns("sites")}
+    if "policy_snapshot" not in site_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE sites ADD COLUMN policy_snapshot TEXT"))
 
     task_columns = {col["name"] for col in inspector.get_columns("tasks")}
     if "focus_areas" not in task_columns:

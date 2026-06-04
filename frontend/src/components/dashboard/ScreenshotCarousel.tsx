@@ -31,6 +31,7 @@ export interface ScreenshotData {
   annotations: Annotation[]
   placeholderSections: PlaceholderSection[]
   screenshotUrl?: string
+  screenshotUrls?: string[]   // ranked list; [0] mirrors screenshotUrl
   heatmapDots?: HeatmapDot[]
 }
 

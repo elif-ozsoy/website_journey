@@ -414,9 +414,10 @@ class AnnotateRequest(BaseModel):
 
 
 class AnnotationPoint(BaseModel):
-    x: float   # centre x, 0–1
-    y: float   # centre y, 0–1
+    x: float   # centre x, 0–100 (percentage)
+    y: float   # centre y, 0–100 (percentage)
     label: str # one sentence: what to change here
+    glyph: str = "warning"  # error | warning | friction | missing | improve
 
 
 class AnnotateResponse(BaseModel):
@@ -441,20 +442,17 @@ class SelectScreenshotResponse(BaseModel):
 _ANNOTATE_SYSTEM = (
     "You are a UI/UX expert annotating a website screenshot. "
     "Given the screenshot and a UX issue description, place 1–4 annotation dots on the most relevant parts of the visible page. "
-    "Choose the strategy that best fits each dot:\n"
-    "  • DISTRACTING content (users click the wrong thing) — dot on the distracting element, "
-    '    label: "Distracting — leads users away from goal".\n'
-    "  • MISSING element — dot where the new element should appear, "
-    '    label: "Add <element> here".\n'
-    "  • WRONG or INCOMPLETE element — dot on the existing element, "
-    '    label: what is wrong.\n'
-    "  • HARD TO FIND — dot where users look but fail, "
-    '    label: "Nav — no obvious <target> entry".\n'
+    "For each dot choose the glyph that best describes the nature of the problem at that location:\n"
+    '  • "error"    — broken element, wrong link/URL, layout bug, 404, crash\n'
+    '  • "warning"  — misleading label, confusing copy, wrong destination, unclear CTA\n'
+    '  • "friction" — element exists but is hard to find, buried, requires too many steps\n'
+    '  • "missing"  — a needed element is absent; place the dot where it should appear\n'
+    '  • "improve"  — element works but could be significantly better (contrast, size, placement)\n'
     "Return x and y as PERCENTAGES (0–100) of image width/height from the top-left corner. "
-    "You MUST always place at least one dot — there is no 'not found' response. "
+    "You MUST always place at least one dot. "
     "If the screenshot matches the issue imperfectly, place a dot on whichever visible element is most related. "
     "Return ONLY valid JSON, no markdown, always with found=true: "
-    '{\"found\": true, \"points\": [{\"x\": 50, \"y\": 30, \"label\": \"...\"}, ...]}.'
+    '{\"found\": true, \"points\": [{\"x\": 50, \"y\": 30, \"glyph\": \"warning\", \"label\": \"...\"}, ...]}.'
 )
 
 _SELECT_SYSTEM = (
@@ -477,15 +475,26 @@ async def annotate_screenshot(
 
     from models.screenshot import Screenshot
     sc = db.get(Screenshot, body.screenshot_id)
-    if not sc or not sc.file_path or not os.path.exists(sc.file_path):
+    if not sc:
         raise HTTPException(status_code=404, detail="Screenshot not found")
 
-    with open(sc.file_path, "rb") as f:
-        raw_bytes = f.read()
-    img_b64 = base64.b64encode(raw_bytes).decode()
+    if sc.data:
+        raw_bytes = sc.data
+    elif sc.file_path and os.path.exists(sc.file_path):
+        with open(sc.file_path, "rb") as f:
+            raw_bytes = f.read()
+    else:
+        raise HTTPException(status_code=404, detail="Screenshot data not available")
 
-    ext = sc.file_path.rsplit(".", 1)[-1].lower()
-    media_type = "image/png" if ext == "png" else "image/jpeg"
+    img_b64 = base64.b64encode(raw_bytes).decode()
+    if raw_bytes[:4] == b'\x89PNG':
+        media_type = "image/png"
+    elif raw_bytes[:2] in (b'\xff\xd8', b'\xff\xe0', b'\xff\xe1'):
+        media_type = "image/jpeg"
+    elif raw_bytes[:4] == b'RIFF' and raw_bytes[8:12] == b'WEBP':
+        media_type = "image/webp"
+    else:
+        media_type = "image/png"
 
     # Read image dimensions so we can normalise pixel coords → percentages later.
     # PNG stores width/height as big-endian uint32 at bytes 16–24.
@@ -510,7 +519,7 @@ async def annotate_screenshot(
             },
             {
                 "role": "assistant",
-                "content": '{"found": true, "points": [{"x": 50, "y": 28, "label": "Above-fold area — no CTA visible here"}, {"x": 50, "y": 84, "label": "Existing CTA too small and low-contrast; hard to spot"}]}',
+                "content": '{"found": true, "points": [{"x": 50, "y": 28, "glyph": "missing", "label": "Above-fold area — no CTA visible here"}, {"x": 50, "y": 84, "glyph": "improve", "label": "Existing CTA too small and low-contrast; hard to spot"}]}',
             },
             # Few-shot: navigation issue visible in header
             {
@@ -519,7 +528,7 @@ async def annotate_screenshot(
             },
             {
                 "role": "assistant",
-                "content": '{"found": true, "points": [{"x": 8, "y": 7, "label": "Navigation bar — only way back, no persistent back button"}, {"x": 50, "y": 6, "label": "Add back-navigation control here"}]}',
+                "content": '{"found": true, "points": [{"x": 8, "y": 7, "glyph": "friction", "label": "Navigation bar — only way back, no persistent back button"}, {"x": 50, "y": 6, "glyph": "missing", "label": "Add back-navigation control here"}]}',
             },
             # Actual request
             {
@@ -602,7 +611,10 @@ async def annotate_screenshot(
                     y = y / _img_h * 100
                 x = max(0.0, min(100.0, x))
                 y = max(0.0, min(100.0, y))
-                pts.append(AnnotationPoint(x=x, y=y, label=str(p.get("label", ""))))
+                glyph = str(p.get("glyph", "warning"))
+                if glyph not in ("error", "warning", "friction", "missing", "improve"):
+                    glyph = "warning"
+                pts.append(AnnotationPoint(x=x, y=y, label=str(p.get("label", "")), glyph=glyph))
             except Exception:
                 continue
         if not pts:
@@ -627,37 +639,112 @@ async def select_screenshot(
 
     from models.screenshot import Screenshot
 
-    # Resolve every candidate ID → (id, file_path, screenshot_row)
-    resolved: list[tuple[int, str, Any]] = []
+    # Resolve every candidate ID → (id, file_path_or_none, screenshot_row)
+    # Accepts both file-backed and DB-blob screenshots.
+    resolved: list[tuple[int, str | None, Any]] = []
     for sid in body.screenshot_ids:
         sc = db.get(Screenshot, sid)
-        if sc and sc.file_path and os.path.exists(sc.file_path):
+        if not sc:
+            continue
+        if sc.data:
+            resolved.append((sid, None, sc))
+        elif sc.file_path and os.path.exists(sc.file_path):
             resolved.append((sid, sc.file_path, sc))
 
     if not resolved:
         return SelectScreenshotResponse(screenshot_id=None)
 
-    # CLIP pre-filter: when more than 6 candidates, rank by semantic similarity
-    # and keep the top 6 before sending images to Claude Haiku.
-    TOP_K = 6
+    TOP_K = 8
+    log = _logging.getLogger(__name__)
     if len(resolved) > TOP_K:
-        try:
-            from services.clip_service import rank_screenshots
-            paths = [fp for _, fp, _ in resolved]
-            top_indices = await rank_screenshots(body.issue_text, paths, top_k=TOP_K)
-            resolved = [resolved[i] for i in top_indices]
-        except Exception as exc:
-            _logging.getLogger(__name__).warning("CLIP pre-selection unavailable: %s", exc)
-            resolved = resolved[:TOP_K]
+        # Step 1: deduplicate by page path — keep at most 2 per unique path
+        # (first + last) so one page can't dominate the candidate set.
+        from collections import defaultdict as _dd
+        by_path: dict[str, list[int]] = _dd(list)
+        for i, (_, _, sc) in enumerate(resolved):
+            by_path[sc.path or ""].append(i)
+
+        deduped: list[int] = []
+        for indices in by_path.values():
+            deduped.append(indices[0])
+            if len(indices) > 1:
+                deduped.append(indices[-1])
+        deduped.sort()
+        resolved_deduped = [resolved[i] for i in deduped]
+        log.info("select_screenshot: deduped %d→%d across %d unique paths",
+                 len(resolved), len(resolved_deduped), len(by_path))
+
+        if len(resolved_deduped) <= TOP_K:
+            resolved = resolved_deduped
+        else:
+            # Step 2: combine path/trigger/step heuristics with CLIP-based visual
+            # relevance and use MMR to pick TOP_K diverse, relevant screenshots.
+            # Pure CLIP alone over-selects content-heavy pages; blending it with
+            # heuristics at 35/65 keeps interaction context dominant while CLIP
+            # breaks ties by visual match.  MMR then prevents sending 8
+            # near-identical frames to Claude.
+            issue_lower = body.issue_text.lower()
+            words = set(w for w in issue_lower.split() if len(w) > 3)
+
+            _TRIGGER_RANK = {"click": 3, "navigate": 3, "input": 2, "scroll": 1}
+
+            def _heuristic_score(idx: int) -> float:
+                _, _, sc = resolved_deduped[idx]
+                path = (sc.path or "").lower()
+                trigger = (sc.trigger or "").lower()
+                path_kw = sum(1 for w in words if w in path)
+                trigger_score = max(
+                    (_TRIGGER_RANK.get(t, 0) for t in _TRIGGER_RANK if t in trigger),
+                    default=0,
+                )
+                try:
+                    step = int(sc.action_id or 0)
+                except (ValueError, TypeError):
+                    step = 999
+                # Prefer steps in the first half of the journey where friction typically begins
+                step_score = max(0, 10 - step) / 10.0
+                return path_kw * 3 + trigger_score + step_score
+
+            h_scores = [_heuristic_score(i) for i in range(len(resolved_deduped))]
+
+            # Build image sources for CLIP (bytes preferred; file path as fallback)
+            clip_sources: list[str | bytes] = [
+                sc.data if sc.data else (fp or b"")
+                for _, fp, sc in resolved_deduped
+            ]
+
+            from services.clip_service import mmr_select
+            selected_indices = await mmr_select(
+                body.issue_text, clip_sources, h_scores, top_k=TOP_K
+            )
+            resolved = [resolved_deduped[i] for i in selected_indices]
+            log.info(
+                "select_screenshot: MMR selected %d from %d — paths/hscores: %s",
+                len(resolved),
+                len(resolved_deduped),
+                [(resolved_deduped[i][2].path, resolved_deduped[i][2].trigger, round(h_scores[i], 2))
+                 for i in selected_indices],
+            )
 
     # Build the vision payload for Claude
     images: list[dict] = []
     id_order: list[int] = []
     for sid, file_path, sc in resolved:
-        with open(file_path, "rb") as f:
-            data = base64.b64encode(f.read()).decode()
-        ext = file_path.rsplit(".", 1)[-1].lower()
-        media_type = "image/png" if ext == "png" else "image/jpeg"
+        if sc.data:
+            raw = sc.data
+        else:
+            with open(file_path, "rb") as f:
+                raw = f.read()
+        data = base64.b64encode(raw).decode()
+        # Detect format from magic bytes — don't trust file extension or path.
+        if raw[:4] == b'\x89PNG':
+            media_type = "image/png"
+        elif raw[:2] in (b'\xff\xd8', b'\xff\xe0', b'\xff\xe1'):
+            media_type = "image/jpeg"
+        elif raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
+            media_type = "image/webp"
+        else:
+            media_type = "image/png"  # safe fallback
         images.append({"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}})
         path_label = sc.path or ""
         images.append({"type": "text", "text": f"[Screenshot {len(id_order)}] page: {path_label}"})
@@ -713,16 +800,24 @@ async def select_screenshot(
             await asyncio.sleep(1.0 * (attempt + 1))
 
     if resp is None or resp.status_code != 200:
+        _logging.getLogger(__name__).warning(
+            "select_screenshot: Anthropic returned %s — %s",
+            resp.status_code if resp else "no response",
+            resp.text[:200] if resp else "",
+        )
         return SelectScreenshotResponse(screenshot_id=id_order[0])
 
+    log = _logging.getLogger(__name__)
     try:
         raw = resp.json()["content"][0]["text"].strip()
+        log.info("select_screenshot: Claude raw response: %s | candidates: %d", raw[:120], len(id_order))
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
         data = json.loads(raw.strip())
         idx = data.get("index")
+        log.info("select_screenshot: picked index=%s → screenshot_id=%s", idx, id_order[idx] if isinstance(idx, int) and idx < len(id_order) else None)
         if idx is None:
             return SelectScreenshotResponse(screenshot_id=None)
         if not isinstance(idx, int) or idx >= len(id_order):

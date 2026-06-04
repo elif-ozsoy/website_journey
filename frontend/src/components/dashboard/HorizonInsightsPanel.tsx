@@ -202,9 +202,9 @@ export default function HorizonInsightsPanel({
           </div>
 
           <div>
-            <SectionLabel>Filter buttons</SectionLabel>
+            <SectionLabel>Highlight behavior</SectionLabel>
             <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.7 }}>
-              Use the <strong>All / AI only / Humans only</strong> buttons in the top-right of the graph to focus on one group. All density values are re-scaled relative to the visible journeys so comparisons stay meaningful.
+              When an action point links to this view, the relevant side (AI or human) is emphasized automatically so you can inspect evidence quickly.
             </p>
           </div>
 

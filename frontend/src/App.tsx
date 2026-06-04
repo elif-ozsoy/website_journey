@@ -32,7 +32,7 @@ export default function App() {
               <AgentRunProvider>
                 <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#e8eaf0' }}>
                   <AppSidebar />
-                  <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+                  <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   <Routes>
                     <Route path="/projects" element={<MyProjectsPage />} />
                     <Route path="/projects/new" element={<NewProjectPage />} />

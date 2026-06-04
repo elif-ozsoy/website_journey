@@ -28,7 +28,7 @@ function saveStatuses(siteId: string, s: Record<string, PointStatus>) {
   localStorage.setItem(STATUS_KEY(siteId), JSON.stringify(s))
 }
 
-const ANN_KEY = (s: string) => `ciphercorgi_annotations_v8_${s}`
+const ANN_KEY = (s: string) => `ciphercorgi_annotations_v9_${s}`
 function loadAnnotations(siteId: string): Map<string, AnnotateResult> {
   try {
     const raw = localStorage.getItem(ANN_KEY(siteId))
@@ -84,6 +84,31 @@ function Label({ children }: { children: React.ReactNode }) {
   return <p style={{ margin: '0 0 4px', fontSize: 'var(--fs-small)', fontWeight: 700, color: 'var(--gray400)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{children}</p>
 }
 
+function CollapsibleSection({ label, children, defaultOpen = true }: { label: string; children: React.ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 5, width: '100%',
+          background: 'none', border: 'none', padding: '0 0 4px', cursor: 'pointer',
+        }}
+      >
+        <span style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: 'var(--gray400)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{label}</span>
+        <svg
+          width="10" height="10" viewBox="0 0 10 10" fill="none"
+          stroke="var(--gray400)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+          style={{ flexShrink: 0, transition: 'transform 0.15s', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}
+        >
+          <path d="M2 3.5l3 3 3-3"/>
+        </svg>
+      </button>
+      {open && children}
+    </div>
+  )
+}
+
 /** Render text with **bold** markdown as actual bold spans, split into paragraphs on blank lines. */
 function RichText({ text, style }: { text: string; style?: React.CSSProperties }) {
   const paragraphs = text.split(/\n\n+/).filter(p => p.trim())
@@ -119,7 +144,7 @@ interface Props {
   humanJourneySteps: AgentStep[][]
   taskFilter: number | null
   tasks: { id: number; title: string }[]
-  onNavigateTo: (tab: string, view?: string, note?: string, diagramRef?: DiagramRef) => void
+  onNavigateTo: (tab: string, view?: string, noteCtx?: { actionPointText: string; taskTitle: string; evidence: string }, diagramRef?: DiagramRef, pointText?: string) => void
   ratingsSummary: api.RatingsSummary | null
   compact?: boolean
   analysisRunId?: number
@@ -184,6 +209,15 @@ function computeStats(
   }
 }
 
+function findMatchingRecommendation(painText: string, recs: ActionPointItem[]): ActionPointItem | null {
+  if (!recs.length) return null
+  const words = painText.toLowerCase().split(/\W+/).filter(w => w.length > 4)
+  if (!words.length) return recs[0]
+  const scored = recs.map(r => ({ r, score: words.filter(w => r.text.toLowerCase().includes(w)).length }))
+  scored.sort((a, b) => b.score - a.score)
+  return scored[0].r
+}
+
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 export default function ActionPointsList({
@@ -211,6 +245,7 @@ export default function ActionPointsList({
   const [annotations, setAnnotations] = useState<Map<string, AnnotateResult>>(() => loadAnnotations(siteId))
   const selectingRef = useRef(new Set<string>())
   const annotatingRef = useRef(new Set<string>())
+  const shotsFetchKeyRef = useRef('')
 
   useEffect(() => {
     if (!analysisRunId) return  // 0 = initial mount, don't clear cached data
@@ -234,18 +269,37 @@ export default function ActionPointsList({
 
   useEffect(() => {
     if (agentJourneyIds.length === 0) return
+    const fetchKey = agentJourneyIds.join(',') + '|' + siteId
+    if (shotsFetchKeyRef.current === fetchKey) return
+    shotsFetchKeyRef.current = fetchKey
     setShotsLoading(true)
-    console.log('[CC:shots] loading screenshots for journeys:', agentJourneyIds)
-    Promise.all(agentJourneyIds.map(id => api.listJourneyScreenshots(id).catch(() => [] as ScreenshotMeta[])))
-      .then(r => {
-        const flat = r.flat().filter(sc => sc.ready)
+
+    const agentShotsP = Promise.all(
+      agentJourneyIds.map(id => api.listJourneyScreenshots(id).catch(() => [] as api.ScreenshotMeta[]))
+    ).then(r => r.flat())
+
+    // Also include human session screenshots so the preselection has the full
+    // picture — agents and humans often visit different pages for the same task.
+    const humanShotsP = api.listSessions(siteId, 20)
+      .then(sessions => Promise.all(
+        sessions.map(s => api.listSessionScreenshots(s.id).catch(() => [] as api.ScreenshotMeta[]))
+      ))
+      .then(r => r.flat())
+      .catch(() => [] as api.ScreenshotMeta[])
+
+    Promise.all([agentShotsP, humanShotsP])
+      .then(([agentShots, humanShots]) => {
+        const flat = [...agentShots, ...humanShots].filter(sc => sc.ready)
         const seen = new Set<number>()
         const unique = flat.filter(sc => { if (seen.has(sc.id)) return false; seen.add(sc.id); return true })
-        console.log(`[CC:shots] loaded ${unique.length} unique screenshots:`, unique.map(s => `${s.id}:${s.path ?? '?'}`))
+        console.log(
+          `[CC:shots] loaded ${unique.length} unique screenshots (${agentShots.length} agent, ${humanShots.length} human):`,
+          unique.map(s => `${s.id}:${s.path ?? '?'}`)
+        )
         setAllShots(unique)
       })
       .finally(() => setShotsLoading(false))
-  }, [agentJourneyIds.join(',')])
+  }, [agentJourneyIds.join(','), siteId])
 
   const rawPoints = compareAnalysis ? derivePoints(compareAnalysis) : []
   const activeTaskTitle = taskFilter !== null ? (tasks.find(t => t.id === taskFilter)?.title ?? null) : null
@@ -256,6 +310,22 @@ export default function ActionPointsList({
     if (points.length > 0 && (selectedId === null || !points.find(p => p.id === selectedId)))
       setSelectedId(points[0].id)
   }, [points.length, activeTaskTitle])
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      const idx = points.findIndex(p => p.id === selectedId)
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        if (idx > 0) setSelectedId(points[idx - 1].id)
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        if (idx < points.length - 1) setSelectedId(points[idx + 1].id)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedId, points])
 
   // Step 1: AI screenshot selection queue (max 2 concurrent)
   // selText: pain-point description used to pick the right screenshot
@@ -461,7 +531,7 @@ export default function ActionPointsList({
         <button
           onClick={onRerunAnalysis}
           disabled={compareLoading}
-          title="Re-run the comparative analysis from scratch (regenerates all action points and diagram links)"
+          title="Re-run the comparative analysis from scratch"
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0,
             padding: '3px 10px', borderRadius: 99, border: '1px solid var(--border)',
@@ -469,7 +539,7 @@ export default function ActionPointsList({
             fontWeight: 700, cursor: compareLoading ? 'not-allowed' : 'pointer',
           }}
         >
-          {compareLoading ? <><Spinner size={9} /> Re-running…</> : '↻ Re-run analysis'}
+          {compareLoading ? <><Spinner size={9} /> Re-running…</> : '↻ Re-run'}
         </button>
 
         {openCount === 0 && points.length > 0 && <span style={{ fontSize: 'var(--fs-small)', color: 'var(--accent)', fontWeight: 600, flexShrink: 0 }}>all resolved ✓</span>}
@@ -564,55 +634,161 @@ export default function ActionPointsList({
   )
 }
 
-// ─── Screenshot with annotation overlay ──────────────────────────────────────
+// ─── Glyph dot ───────────────────────────────────────────────────────────────
 
-// Project palette: red → brand blue → amber → accent-bright → deeper blue
-const DOT_PALETTE = ['#C73E1D', '#185FA5', '#d97706', '#378ADD']
+const GLYPH_COLOR = '#185FA5'
+
+const GLYPH_CONFIG = {
+  // Circle with × — broken element, wrong link, layout bug
+  error: {
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="8" cy="8" r="6.5"/>
+        <path d="M5.5 5.5l5 5M10.5 5.5l-5 5"/>
+      </svg>
+    ),
+  },
+  // Triangle with ! — misleading label, confusing copy, wrong destination
+  warning: {
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8 2L1.3 13.5h13.4L8 2z"/>
+        <line x1="8" y1="7" x2="8" y2="10.5"/>
+        <circle cx="8" cy="12.5" r="0.8" fill="white" stroke="none"/>
+      </svg>
+    ),
+  },
+  // Magnifying glass — element exists but is buried or hard to find
+  friction: {
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round">
+        <circle cx="6.5" cy="6.5" r="4.5"/>
+        <line x1="10" y1="10" x2="14" y2="14"/>
+      </svg>
+    ),
+  },
+  // Plus — needed element is absent; dot marks where it should go
+  missing: {
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round">
+        <line x1="8" y1="2" x2="8" y2="14"/>
+        <line x1="2" y1="8" x2="14" y2="8"/>
+      </svg>
+    ),
+  },
+  // Trending-up — works but could be significantly better
+  improve: {
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M2 12l4-4 3 3 5-6"/>
+        <path d="M11 5h3v3"/>
+      </svg>
+    ),
+  },
+} as const
+
+type GlyphType = keyof typeof GLYPH_CONFIG
+
+export function GlyphDot({ glyph, open = false, onClick, onMouseEnter, onMouseLeave, animationDelay = '0s' }: {
+  glyph?: string; open?: boolean
+  onClick?: () => void; onMouseEnter?: () => void; onMouseLeave?: () => void
+  animationDelay?: string
+}) {
+  const cfg = GLYPH_CONFIG[(glyph as GlyphType) in GLYPH_CONFIG ? (glyph as GlyphType) : 'warning']
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      style={{
+        width: 32, height: 32, borderRadius: '50%',
+        background: GLYPH_COLOR,
+        border: '3px solid rgba(255,255,255,0.9)',
+        boxShadow: open
+          ? `0 0 0 4px rgba(255,255,255,.9), 0 0 0 7px ${GLYPH_COLOR}44`
+          : `0 0 0 3px rgba(255,255,255,.85), 0 2px 8px rgba(0,0,0,.25)`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        position: 'relative', cursor: 'pointer',
+        animation: `sc-dot-pop 0.4s cubic-bezier(.34,1.56,.64,1) ${animationDelay} both`,
+        transition: 'box-shadow 0.15s',
+      }}
+    >
+      {cfg.icon}
+      <div style={{
+        position: 'absolute', inset: -3, borderRadius: '50%',
+        border: `2px solid ${GLYPH_COLOR}`,
+        animation: `sc-pulse 2s ease-out infinite`,
+        animationDelay,
+        pointerEvents: 'none',
+      }} />
+    </div>
+  )
+}
+
+// ─── Screenshot with annotation overlay ──────────────────────────────────────
 
 function AnnotationDot({ point, dotIndex = 0 }: { point: AnnotationPoint; dotIndex?: number }) {
   const [open, setOpen] = useState(false)
-  const color = DOT_PALETTE[dotIndex % DOT_PALETTE.length]
-  const above = point.y > 15
+  const above = point.y > 50
+  const cardLeft = point.x < 30
+    ? { left: '-8px', transform: 'none' }
+    : point.x > 70
+    ? { right: '-8px', left: 'auto' as const, transform: 'none' }
+    : { left: '50%', transform: 'translateX(-50%)' }
 
   return (
-    <div
-      role="button"
-      onClick={() => setOpen(o => !o)}
-      style={{
-        position: 'absolute',
-        left: `${point.x}%`, top: `${point.y}%`,
-        transform: 'translate(-50%,-50%)',
-        zIndex: 10, cursor: 'pointer',
-      }}
-    >
-      <div style={{
-        width: 16, height: 16, borderRadius: '50%',
-        background: color,
-        border: '2.5px solid #fff',
-        boxShadow: `0 0 0 3px ${color}55, 0 2px 8px rgba(0,0,0,0.5)`,
-      }} />
+    <div style={{ position: 'absolute', left: `${point.x}%`, top: `${point.y}%`, transform: 'translate(-50%,-50%)', zIndex: open ? 30 : 10 }}>
 
+      <GlyphDot
+        glyph={point.glyph}
+        open={open}
+        onClick={() => setOpen(v => !v)}
+        animationDelay={`${dotIndex * 0.12}s`}
+      />
+
+      {/* Card — click to open/close */}
       {open && (
-        <div style={{
-          position: 'absolute',
-          left: '50%', transform: 'translateX(-50%)',
-          ...(above ? { bottom: 'calc(100% + 10px)' } : { top: 'calc(100% + 10px)' }),
-          width: 220, padding: '8px 10px', borderRadius: 8,
-          background: '#0f172a', color: '#e2e8f0',
-          fontSize: 'var(--fs-small)', lineHeight: 1.55, fontWeight: 500,
-          boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-          border: `1px solid ${color}55`,
-          zIndex: 20, pointerEvents: 'none',
-          whiteSpace: 'normal',
-        }}>
-          {point.label}
-          <div style={{
-            position: 'absolute', left: '50%', transform: 'translateX(-50%)',
-            ...(above
-              ? { bottom: -5, borderTop: `5px solid #0f172a`, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderBottom: 'none' }
-              : { top: -5, borderBottom: `5px solid #0f172a`, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: 'none' }),
-            width: 0, height: 0,
-          }} />
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            ...cardLeft,
+            ...(above ? { bottom: 'calc(100% + 14px)' } : { top: 'calc(100% + 14px)' }),
+            width: 270,
+            background: '#fff',
+            borderRadius: 10,
+            border: '1px solid rgba(0,0,0,0.08)',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.16), 0 2px 8px rgba(0,0,0,0.08)',
+            fontFamily: 'var(--font-sans)',
+            zIndex: 50,
+            animation: 'dotCardIn 0.15s ease-out',
+          }}
+        >
+          <div style={{ padding: '12px 14px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+            <p style={{
+              margin: 0, flex: 1,
+              fontSize: '12.5px', lineHeight: 1.6, fontWeight: 500,
+              color: '#1e293b', whiteSpace: 'normal',
+              wordBreak: 'break-word', overflowWrap: 'anywhere',
+            }}>
+              {point.label}
+            </p>
+            <button
+              onClick={() => setOpen(false)}
+              style={{
+                flexShrink: 0, width: 20, height: 20, borderRadius: 5,
+                border: 'none', background: '#f1f5f9', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#94a3b8', transition: 'background 0.12s', marginTop: 1,
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0' }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9' }}
+            >
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M1 1l6 6M7 1l-6 6"/>
+              </svg>
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -752,12 +928,12 @@ function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJou
   humanJourneySteps: AgentStep[][]
   ratingsSummary: api.RatingsSummary | null
   onDone: () => void; onSkip: () => void; onPrev: () => void; onNext: () => void
-  onNavigateTo: (tab: string, view?: string, note?: string, diagramRef?: DiagramRef) => void
+  onNavigateTo: (tab: string, view?: string, noteCtx?: { actionPointText: string; taskTitle: string; evidence: string }, diagramRef?: DiagramRef, pointText?: string) => void
   compact?: boolean
 }) {
   const isPain = point.type === 'pain_point'
-  const relevantRec = isPain && point.task.recommendations[point.ppIndex]
-    ? toItem(point.task.recommendations[point.ppIndex] as ActionPointItem | string)
+  const relevantRec = isPain
+    ? findMatchingRecommendation(point.item.text, point.task.recommendations.map(r => toItem(r as ActionPointItem | string)))
     : null
   const derivation = derivationSummary(point.task, stats)
   const diagrams = point.item.diagrams ?? []
@@ -823,134 +999,114 @@ function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJou
         <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{point.task.task_title}</span>
       </div>
 
-      {/* Issue text + type badge */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <p style={{ margin: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.6 }}>{point.item.text}</p>
-        {point.item.type && (() => {
-          const badgeMap = {
-            ux_issue:     { label: 'UX Issue',    bg: '#fee2e2', color: '#b91c1c' },
-            agent_gap:    { label: 'Agent Gap',   bg: '#e0ecee', color: '#32494B' },
-            human_issue:  { label: 'Human Issue', bg: '#f7d5e2', color: '#881342' },
-          }
-          const b = badgeMap[point.item.type]
-          return b ? (
-            <span style={{ alignSelf: 'flex-start', fontSize: '10px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', padding: '2px 7px', borderRadius: 99, background: b.bg, color: b.color }}>
-              {b.label}
-            </span>
-          ) : null
-        })()}
-      </div>
+      {/* Issue text */}
+      <p style={{ margin: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.6 }}>{point.item.text}</p>
 
-      {compact && (
-        <div style={{ padding: '10px 12px', borderRadius: 8, background: 'var(--gray50)', border: '1px dashed var(--border)', color: 'var(--gray600)', fontSize: 'var(--fs-small)', lineHeight: 1.55 }}>
-          The matching issue and fix markers are shown in the screenshot above.
-        </div>
-      )}
 
-      {/* Suggested fix */}
+{/* Suggested fix */}
       {relevantRec && (
-        <div style={{ padding: '9px 12px', borderRadius: 8, background: 'var(--brand-pale)', border: '1px solid var(--accent-soft)' }}>
-          <Label>Suggested action</Label>
-          <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--brand)', lineHeight: 1.55 }}>{relevantRec.text}</p>
-        </div>
+        <CollapsibleSection label="Suggested action">
+          <div style={{ padding: '9px 12px', borderRadius: 8, background: 'var(--brand-pale)', border: '1px solid var(--accent-soft)' }}>
+            <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--brand)', lineHeight: 1.55 }}>{relevantRec.text}</p>
+          </div>
+        </CollapsibleSection>
       )}
 
       {/* Human vs Agent behaviour bullets */}
       {(point.item.human_bullets?.length || point.item.agent_bullets?.length || humanJourneySteps.length > 0) ? (
-        <div style={{ borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid var(--border)' }}>
-            <div style={{ padding: '6px 10px', borderRight: '1px solid var(--border)', background: 'var(--gray50)' }}>
-              <Label>Human Behaviour</Label>
+        <CollapsibleSection label="Behaviour comparison">
+          <div style={{ borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ padding: '6px 10px', borderRight: '1px solid var(--border)', background: 'var(--gray50)' }}>
+                <Label>Human</Label>
+              </div>
+              <div style={{ padding: '6px 10px', background: 'var(--gray50)' }}>
+                <Label>Agent</Label>
+              </div>
             </div>
-            <div style={{ padding: '6px 10px', background: 'var(--gray50)' }}>
-              <Label>Agent Behaviour</Label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+              <ul style={{ margin: 0, padding: '8px 10px 8px 22px', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {(point.item.human_bullets ?? []).map((b, i) => (
+                  <li key={i} style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.5 }}>{b}</li>
+                ))}
+                {!point.item.human_bullets?.length && (
+                  <li style={{ listStyle: 'none', fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>No human data</li>
+                )}
+              </ul>
+              <ul style={{ margin: 0, padding: '8px 10px 8px 22px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {(point.item.agent_bullets ?? []).map((b, i) => (
+                  <li key={i} style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.5 }}>{b}</li>
+                ))}
+                {!point.item.agent_bullets?.length && (
+                  <li style={{ listStyle: 'none', fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>No agent data</li>
+                )}
+              </ul>
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-            <ul style={{ margin: 0, padding: '8px 10px 8px 22px', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {(point.item.human_bullets?.length ? point.item.human_bullets : humanNarratives).map((b, i) => (
-                <li key={i} style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.5 }}>{b}</li>
-              ))}
-              {!point.item.human_bullets?.length && humanNarratives.length === 0 && humanJourneySteps.length > 0 && (
-                <li style={{ listStyle: 'none', fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>Human sessions recorded — re-run analysis to include</li>
-              )}
-            </ul>
-            <ul style={{ margin: 0, padding: '8px 10px 8px 22px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {(point.item.agent_bullets ?? []).map((b, i) => (
-                <li key={i} style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.5 }}>{b}</li>
-              ))}
-              {!point.item.agent_bullets?.length && (
-                <li style={{ listStyle: 'none', fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>No agent data</li>
-              )}
-            </ul>
-          </div>
-        </div>
+        </CollapsibleSection>
       ) : null}
 
       {/* Key finding */}
       {point.task.differences[0] && (
-        <div>
-          <Label>Key finding from analysis</Label>
+        <CollapsibleSection label="Key finding from analysis">
           <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--gray600)', lineHeight: 1.6 }}>{point.task.differences[0]}</p>
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* Perspectives: agent explanation + human explanation */}
       {hasPerspectives && (
-        <div style={{ borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid var(--border)' }}>
-            <div style={{ padding: '6px 10px', borderRight: '1px solid var(--border)', background: 'var(--gray50)' }}>
-              <Label>Explanation Agent</Label>
+        <CollapsibleSection label="Perspectives">
+          <div style={{ borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ padding: '6px 10px', borderRight: '1px solid var(--border)', background: 'var(--gray50)' }}>
+                <Label>Agent</Label>
+              </div>
+              <div style={{ padding: '6px 10px', background: 'var(--gray50)' }}>
+                <Label>Human</Label>
+              </div>
             </div>
-            <div style={{ padding: '6px 10px', background: 'var(--gray50)' }}>
-              <Label>Explanation Human</Label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+              <div style={{ padding: '8px 10px', borderRight: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start' }}>
+                {agentThoughts.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>No matching thoughts found</p>
+                ) : agentExpLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-small)', color: 'var(--gray400)' }}>
+                    <Spinner size={9} /> Analysing…
+                  </div>
+                ) : agentExplanation ? (
+                  <div style={{ borderLeft: '2px solid var(--brand)', paddingLeft: 7 }}>
+                    <RichText text={agentExplanation} style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.55 }} />
+                  </div>
+                ) : (
+                  <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>No matching thoughts found</p>
+                )}
+              </div>
+              <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'flex-start' }}>
+                {!hasHumanData ? (
+                  <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>No human data available</p>
+                ) : humanExpLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-small)', color: 'var(--gray400)' }}>
+                    <Spinner size={9} /> Analysing…
+                  </div>
+                ) : humanExplanation ? (
+                  <div style={{ borderLeft: '2px solid #f59e0b', paddingLeft: 7 }}>
+                    <RichText text={humanExplanation} style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.55 }} />
+                  </div>
+                ) : (
+                  <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>No human data available</p>
+                )}
+              </div>
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-            {/* Agent explanation */}
-            <div style={{ padding: '8px 10px', borderRight: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start' }}>
-              {agentThoughts.length === 0 ? (
-                <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>No matching thoughts found</p>
-              ) : agentExpLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-small)', color: 'var(--gray400)' }}>
-                  <Spinner size={9} /> Analysing…
-                </div>
-              ) : agentExplanation ? (
-                <div style={{ borderLeft: '2px solid var(--brand)', paddingLeft: 7 }}>
-                  <RichText text={agentExplanation} style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.55 }} />
-                </div>
-              ) : (
-                <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>No matching thoughts found</p>
-              )}
-            </div>
-            {/* Human explanation — AI-generated from journey steps + feedback */}
-            <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'flex-start' }}>
-              {!hasHumanData ? (
-                <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>No human data available</p>
-              ) : humanExpLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-small)', color: 'var(--gray400)' }}>
-                  <Spinner size={9} /> Analysing…
-                </div>
-              ) : humanExplanation ? (
-                <div style={{ borderLeft: '2px solid #f59e0b', paddingLeft: 7 }}>
-                  <RichText text={humanExplanation} style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.55 }} />
-                </div>
-              ) : (
-                <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic' }}>No human data available</p>
-              )}
-            </div>
-          </div>
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* Diagram chips — compact pill links */}
       {diagrams.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <Label>Verify in diagrams</Label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        <CollapsibleSection label="Verify in diagrams">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {diagrams.map((d) => {
               const label = DIAGRAM_LABELS[d.view] ?? d.view
-              const note = `Action point: "${point.item.text.slice(0, 100)}${point.item.text.length > 100 ? '…' : ''}" · Task: ${point.task.task_title} · Evidence: ${d.reason}`
               const derivedSide = point.item.type === 'agent_gap' ? 'ai' : point.item.type === 'human_issue' ? 'human' : undefined
               const enriched: DiagramRef = {
                 ...d,
@@ -960,23 +1116,26 @@ function IssueDetail({ point, idx, total, status, stats, agentJourneys, humanJou
                 <button
                   key={d.view}
                   title={d.reason}
-                  onClick={() => onNavigateTo('views', d.view, note, enriched)}
+                  onClick={() => onNavigateTo('views', d.view, { actionPointText: point.item.text, taskTitle: point.task.task_title, evidence: d.reason }, enriched, d.view === 'heatmap' ? point.item.text : undefined)}
                   style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    padding: '4px 10px', height: 28, borderRadius: 99,
-                    border: '1px solid var(--border)', background: 'var(--gray50)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    width: '100%', padding: '5px 10px', borderRadius: 6,
+                    border: '1px solid var(--border)', background: 'none',
                     fontSize: 'var(--fs-small)', fontWeight: 600, color: 'var(--brand)',
-                    cursor: 'pointer', whiteSpace: 'nowrap', transition: 'background 0.12s, border-color 0.12s',
+                    cursor: 'pointer', transition: 'border-color 0.12s',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--brand-pale)'; e.currentTarget.style.borderColor = 'var(--brand)' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--gray50)'; e.currentTarget.style.borderColor = 'var(--border)' }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--brand)' }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
                 >
-                  {label} ↗
+                  {label}
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5, flexShrink: 0 }}>
+                    <path d="M2.5 6h7M6.5 3l3 3-3 3"/>
+                  </svg>
                 </button>
               )
             })}
           </div>
-        </div>
+        </CollapsibleSection>
       )}
 
       <div style={{ flex: 1 }} />
