@@ -108,7 +108,7 @@ def _build_llm(llm_provider: str, api_key: str, model: str | None):
             model=model or "meta/llama-4-maverick-17b-128e-instruct",
             api_key=api_key,
             base_url="https://integrate.api.nvidia.com/v1",
-            timeout=120,
+            timeout=300,
         )
 
     if llm_provider == "google":
@@ -270,7 +270,7 @@ async def run_browser_agent(
         use_judge=False,
         max_history_items=10,
         max_failures=5,
-        llm_timeout=120,
+        llm_timeout=300,
         max_actions_per_step=1,
         save_conversation_path=save_conversation_path,
         extend_system_message=extend_system_message,
