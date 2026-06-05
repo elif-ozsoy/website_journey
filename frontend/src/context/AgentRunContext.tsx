@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useRef, type ReactNode } from 'react'
 import type { Task, Agent } from '../lib/types'
+import { providerForModel } from '../lib/types'
 import type { AgentStep, AgentResult, WsMessage } from '../components/agent/agentTypes'
 
 export type AgentRunState = 'idle' | 'running' | 'complete' | 'error'
@@ -7,6 +8,8 @@ export type AgentRunState = 'idle' | 'running' | 'complete' | 'error'
 interface AgentRunContextValue {
   apiKey: string
   setApiKey: (key: string) => void
+  googleApiKey: string
+  setGoogleApiKey: (key: string) => void
   provider: 'nvidia' | 'google'
   setProvider: (p: 'nvidia' | 'google') => void
 
@@ -74,9 +77,11 @@ function runSingleTask(
 
 export function AgentRunProvider({ children }: { children: ReactNode }) {
   const [apiKey, setApiKeyState] = useState(() => localStorage.getItem('ciphercorgi_apikey') ?? '')
+  const [googleApiKey, setGoogleApiKeyState] = useState(() => localStorage.getItem('ciphercorgi_apikey_google') ?? '')
   const [provider, setProviderState] = useState<'nvidia' | 'google'>(() => (localStorage.getItem('ciphercorgi_provider') as 'nvidia' | 'google') ?? 'nvidia')
 
   function setApiKey(key: string) { setApiKeyState(key); localStorage.setItem('ciphercorgi_apikey', key) }
+  function setGoogleApiKey(key: string) { setGoogleApiKeyState(key); localStorage.setItem('ciphercorgi_apikey_google', key) }
   function setProvider(p: 'nvidia' | 'google') { setProviderState(p); localStorage.setItem('ciphercorgi_provider', p) }
 
   const [runState, setRunState] = useState<AgentRunState>('idle')
@@ -109,7 +114,7 @@ export function AgentRunProvider({ children }: { children: ReactNode }) {
   async function startRun(siteId: string, siteUrl: string, tasks: Task[], versionId?: string, selectedAgents?: Agent[]) {
     if (isRunningRef.current) return
     setErrorMsg('')
-    if (!apiKey.trim()) { setErrorMsg('Enter an API key above before running agents.'); return }
+    if (!apiKey.trim() && !googleApiKey.trim()) { setErrorMsg('Enter an API key in settings before running agents.'); return }
     if (tasks.length === 0) { setErrorMsg('Add at least one task in Step 1 before running agents.'); return }
 
     isRunningRef.current = true
@@ -152,8 +157,11 @@ export function AgentRunProvider({ children }: { children: ReactNode }) {
           const taskPrompt = `${task.title}${task.description ? '. ' + task.description : ''}${focusPart}`
 
           try {
+            const rawProvider = agentRun.model ? providerForModel(agentRun.model) : provider
+            const agentProvider: 'nvidia' | 'google' = rawProvider === 'local' ? 'nvidia' : rawProvider
+            const agentKey = agentProvider === 'google' ? googleApiKey.trim() : apiKey.trim()
             const result = await runSingleTask(
-              taskPrompt, siteUrl, provider, apiKey.trim(), agentUrl,
+              taskPrompt, siteUrl, agentProvider, agentKey, agentUrl,
               (msg) => {
                 if (!isRunningRef.current) return
                 if (!parallel) setStatusMsg(msg)
@@ -213,7 +221,7 @@ export function AgentRunProvider({ children }: { children: ReactNode }) {
 
   return (
     <AgentRunContext.Provider value={{
-      apiKey, setApiKey,
+      apiKey, setApiKey, googleApiKey, setGoogleApiKey,
       provider, setProvider,
       runState, currentTaskIdx, totalTasks, statusMsg, runningTaskTitle, errorMsg, liveStepCount, progress,
       runningSiteId, runningVersionId,

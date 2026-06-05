@@ -66,9 +66,9 @@ export interface Agent {
 }
 
 export const DEFAULT_AGENTS: Agent[] = [
-  { id: 'navigator', name: 'Navigator', model: '', selected: false, prompt: 'Calm and direct. Follows the clearest path.' },
-  { id: 'skeptic', name: 'Skeptic', model: '', selected: false, prompt: 'Careful and exact. Looks for unclear labels.' },
-  { id: 'first-time-user', name: 'First-time User', model: '', selected: false, prompt: 'Simple and cautious. Explores like a new visitor.' },
+  { id: 'navigator', name: 'Navigator', model: 'gemini-2.5-flash', selected: false, prompt: 'Calm and direct. Follows the clearest path.' },
+  { id: 'skeptic', name: 'Skeptic', model: 'gemini-2.5-flash', selected: false, prompt: 'Careful and exact. Looks for unclear labels.' },
+  { id: 'first-time-user', name: 'First-time User', model: 'gemini-2.5-flash', selected: false, prompt: 'Simple and cautious. Explores like a new visitor.' },
 ]
 
 export interface ModelOption {
@@ -79,12 +79,11 @@ export interface ModelOption {
 
 export const MODEL_OPTIONS: ModelOption[] = [
   // NVIDIA NIM — use your nvapi- key
+  // Google Gemini — use your AIza- key
+  { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash  (Google)', provider: 'google' },
+  { value: 'gemini-1.5-pro',  label: 'Gemini 1.5 Pro  (Google)',   provider: 'google' },
   { value: 'meta/llama-4-maverick-17b-128e-instruct', label: 'Llama 4 Maverick 17B  (NVIDIA NIM)', provider: 'nvidia' },
   { value: 'google/gemma-4-31b-it',                   label: 'Gemma 4 31B  (NVIDIA NIM)',          provider: 'nvidia' },
-  // Google Gemini — use your AIza- key
-  { value: 'gemini-2.0-flash-exp', label: 'Gemini 2.0 Flash  (Google)', provider: 'google' },
-  { value: 'gemini-1.5-flash',     label: 'Gemini 1.5 Flash  (Google)', provider: 'google' },
-  { value: 'gemini-1.5-pro',       label: 'Gemini 1.5 Pro  (Google)',   provider: 'google' },
 ]
 
 export const AVAILABLE_MODELS = MODEL_OPTIONS.map(m => m.value)

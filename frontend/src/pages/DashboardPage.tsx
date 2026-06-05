@@ -972,7 +972,10 @@ useEffect(() => {
             >
               {[...versions].reverse().map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
             </select>
-            <button className="btn btn-primary btn-xs" style={{ whiteSpace: 'nowrap' }} onClick={() => setReEvalOpen(true)}>
+            <button className="btn btn-primary btn-xs" style={{ whiteSpace: 'nowrap' }} onClick={() => {
+              if (compareLoading && !window.confirm('Analysis is still running. Start a new evaluation anyway?')) return
+              setReEvalOpen(true)
+            }}>
               Evaluate Updated Version
             </button>
             <span className="info-tooltip-wrap">
@@ -1118,10 +1121,19 @@ useEffect(() => {
                   </div>
                 ) : (
                   <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: 'var(--gray400)', fontSize: 'var(--fs-body)' }}>
-                    <span style={{ fontSize: 'var(--fs-headline)' }}>📸</span>
-                    <span style={{ fontSize: 'var(--fs-small)' }}>
-                      {compareAnalysis ? 'No matching screenshot for this action point' : 'No journeys recorded yet. Run an agent or record a human session to see screenshots.'}
-                    </span>
+                    {compareLoading ? (
+                      <>
+                        <span style={{ width: 20, height: 20, border: '2.5px solid var(--gray200)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.7s linear infinite', display: 'inline-block' }} />
+                        <span style={{ fontSize: 'var(--fs-small)' }}>Generating analysis…</span>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ fontSize: 'var(--fs-headline)' }}>📸</span>
+                        <span style={{ fontSize: 'var(--fs-small)' }}>
+                          {compareAnalysis ? 'No matching screenshot for this action point' : 'No journeys recorded yet. Run an agent or record a human session to see screenshots.'}
+                        </span>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

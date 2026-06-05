@@ -335,11 +335,22 @@ export function getStoredAnalysis(siteId: string, versionId: string) {
   )
 }
 
-export function runComparativeAnalysis(siteId: string, taskIds?: number[], versionId = 'v1') {
-  return request<ComparativeAnalysis>(`/v1/sites/${siteId}/comparative-analysis`, {
+export async function runComparativeAnalysis(siteId: string, taskIds?: number[], versionId = 'v1'): Promise<ComparativeAnalysis> {
+  // POST starts the analysis in the background (returns 202 immediately)
+  await request<{ status: string }>(`/v1/sites/${siteId}/comparative-analysis`, {
     method: 'POST',
     body: JSON.stringify({ task_ids: taskIds ?? null, version_id: versionId }),
   })
+  // Poll GET until the result is saved
+  const deadline = Date.now() + 10 * 60 * 1000 // 10 min max
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 4000))
+    try {
+      const result = await getStoredAnalysis(siteId, versionId)
+      if (result) return result
+    } catch { /* not ready yet */ }
+  }
+  throw new Error('Analysis timed out after 10 minutes')
 }
 
 // ─── Explain AI ───────────────────────────────────────────────────────────────

@@ -115,7 +115,7 @@ export default function SankeyInsightsPanel({
     for (const task of compareAnalysis.task_analyses) {
       if (task.difficulty === 'low') continue
       const severity: 'high' | 'medium' = task.difficulty === 'high' ? 'high' : 'medium'
-      for (const raw of [...(task.pain_points ?? []), ...(task.recommendations ?? [])]) {
+      for (const raw of [...task.pain_points, ...task.recommendations]) {
         const item = raw as ActionPointItem
         const ref = item.diagrams?.find(d => d.view === 'sankey')
         if (!ref) continue
@@ -219,10 +219,6 @@ export default function SankeyInsightsPanel({
           {/* ── Action point context card (from "Verify in diagrams" link) ── */}
           {actionContext && (
             <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button
-                onClick={onClearActionContext}
-                style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 'var(--fs-small)', color: 'var(--gray500)', fontWeight: 600, padding: '0 0 2px' }}
-              >← All insights</button>
               {actionContext.note && (
                 <div style={{ background: 'var(--surface)', border: '1.5px solid var(--brand)', borderRadius: 8, padding: '10px 12px' }}>
                   <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--brand)', marginBottom: 6 }}>Action Point</div>
@@ -258,10 +254,10 @@ export default function SankeyInsightsPanel({
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  width: 16, height: 16, borderRadius: '50%', background: '#f59e0b',
+                  width: 16, height: 16, borderRadius: '50%', background: '#3b82f6',
                   color: '#fff', fontSize: '0.6rem', fontWeight: 800, flexShrink: 0,
                 }}>⚡</span>
-                <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: 99, background: '#fef3c7', color: '#92400e' }}>
+                <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: 99, background: '#dbeafe', color: '#1d4ed8' }}>
                   {divergences.length} DIVERGENCE{divergences.length !== 1 ? 'S' : ''} DETECTED
                 </span>
               </div>
@@ -271,15 +267,15 @@ export default function SankeyInsightsPanel({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {divergences.map(d => (
                   <div key={d.nodeId} style={{
-                    paddingLeft: 10, borderLeft: '2px solid #fbbf24',
+                    paddingLeft: 10, borderLeft: '2px solid #93c5fd',
                     display: 'flex', flexDirection: 'column', gap: 3,
                   }}>
-                    <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: '#78350f' }}>
+                    <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: '#1e40af' }}>
                       {d.nodeName} · {d.groups.length} paths
                     </div>
                     {d.groups.map((g, gi) => (
                       <div key={gi} style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-                        <span style={{ color: '#b45309', fontWeight: 700, flexShrink: 0 }}>•</span>
+                        <span style={{ color: '#2563eb', fontWeight: 700, flexShrink: 0 }}>•</span>
                         <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>"{truncate(g.label, 44)}"</span>
                         <span style={{ color: 'var(--gray400)', flexShrink: 0 }}>({g.visits.length})</span>
                       </div>
@@ -300,59 +296,30 @@ export default function SankeyInsightsPanel({
           )}
 
           {/* ── Action point cards ── */}
+          <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {sankeyPoints.map((pt, i) => {
-            const badge = pt.type ? BADGE_MAP[pt.type] : null
             const explanation = explanations[pt.id]
             const isLoading = expLoading[pt.id]
-
             return (
-              <div key={pt.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--gray100)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {/* Severity + task */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{
-                    fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: 99, flexShrink: 0,
-                    background: pt.severity === 'high' ? '#fee2e2' : '#fef3c7',
-                    color: pt.severity === 'high' ? '#b91c1c' : '#d97706',
-                  }}>
-                    {pt.severity.toUpperCase()}
-                  </span>
-                  <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div key={pt.id} style={{ borderRadius: 8, border: '1px solid var(--border)', background: 'var(--white)', overflow: 'hidden', flexShrink: 0 }}>
+                <div style={{ padding: '7px 12px', background: 'var(--gray50)', borderBottom: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
                     {pt.taskTitle}
                   </span>
                 </div>
-
-                {/* Action point text */}
-                <p style={{ margin: 0, fontSize: 'var(--fs-small)', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.5 }}>
-                  {i + 1}. {pt.text}
-                </p>
-
-                {badge && (
-                  <span style={{
-                    alignSelf: 'flex-start', fontSize: '10px', fontWeight: 700, letterSpacing: '0.04em',
-                    textTransform: 'uppercase', padding: '2px 7px', borderRadius: 99,
-                    background: badge.bg, color: badge.color,
-                  }}>
-                    {badge.label}
-                  </span>
-                )}
-
-                {/* What to look for in the diagram */}
-                <div style={{ padding: '8px 10px', borderRadius: 6, background: 'var(--gray50)', border: '1px solid var(--gray100)' }}>
-                  <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--gray400)', marginBottom: 5 }}>
-                    What to look for in the diagram
-                  </div>
-                  <p style={{ margin: '0 0 6px', fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.5 }}>
-                    {pt.reason}
+                <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                    {i + 1}. {pt.text}
                   </p>
+                  {pt.reason && (
+                    <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray500)', lineHeight: 1.5 }}>{pt.reason}</p>
+                  )}
                   {isLoading ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-small)', color: 'var(--gray400)' }}>
                       <Spinner size={9} /> Analysing…
                     </div>
                   ) : explanation ? (
-                    <p style={{
-                      margin: 0, fontSize: 'var(--fs-small)', color: 'var(--brand)', lineHeight: 1.5,
-                      borderLeft: '2px solid var(--brand)', paddingLeft: 7,
-                    }}>
+                    <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--brand)', lineHeight: 1.5, borderLeft: '2px solid var(--brand)', paddingLeft: 7 }}>
                       {explanation}
                     </p>
                   ) : null}
@@ -360,6 +327,7 @@ export default function SankeyInsightsPanel({
               </div>
             )
           })}
+          </div>
 
           <div style={{ flex: 1 }} />
         </div>

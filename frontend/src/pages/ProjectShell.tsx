@@ -14,11 +14,7 @@ export default function ProjectShell() {
       .catch(() => setSite(null))
   }, [siteId])
 
-  if (site === 'loading') return (
-    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
-      <span style={{ width: 24, height: 24, border: '2.5px solid var(--gray200)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.7s linear infinite', display: 'inline-block' }} />
-    </div>
-  )
+  if (site === 'loading') return null
   if (!siteId || !site) return <Navigate to="/projects" replace />
 
   return (

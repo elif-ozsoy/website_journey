@@ -652,7 +652,7 @@ function ScreenshotStrip({ steps, filterFn, max = 6, onOpen }: {
   )
 }
 
-// ── Bar3DChart ────────────────────────────────────────────────────────────────
+// ── BarChart (2D) ─────────────────────────────────────────────────────────────
 
 function Bar3DChart({ data, color, maxVal, highlightValues, selectedValue, onSelect }: {
   data: Array<{ label: string; value: number; fullLabel?: string }>
@@ -669,9 +669,8 @@ function Bar3DChart({ data, color, maxVal, highlightValues, selectedValue, onSel
     svg.selectAll('*').remove()
     if (!data.length) return
 
-    const DX = 9, DY = -6
-    const W = 260, H = 160
-    const ml = 24, mr = DX + 6, mt = Math.abs(DY) + 10, mb = 40
+    const W = 260, H = 150
+    const ml = 24, mr = 6, mt = 16, mb = 38
     const iw = W - ml - mr, ih = H - mt - mb
     svg.attr('viewBox', `0 0 ${W} ${H}`)
     const g = svg.append('g').attr('transform', `translate(${ml},${mt})`)
@@ -680,101 +679,64 @@ function Bar3DChart({ data, color, maxVal, highlightValues, selectedValue, onSel
     const n = data.length
     const bw = Math.min(28, Math.floor((iw / n) * 0.6))
     const totalBarW = bw * n
-    const totalGap = iw - totalBarW
-    const gapUnit = totalGap / (n + 1)
+    const gapUnit = (iw - totalBarW) / (n + 1)
     const baseline = ih
 
-    // Back wall grid lines
+    // Grid lines
     const yTicks = [0.25, 0.5, 0.75, 1.0].map(f => Math.round(maxV * f))
     yTicks.forEach(t => {
       const y = baseline - (t / maxV) * ih
-      // Back grid line (offset by depth)
-      g.append('line')
-        .attr('x1', DX).attr('y1', y + DY)
-        .attr('x2', iw + DX).attr('y2', y + DY)
-        .attr('stroke', '#e2e8f0').attr('stroke-width', 0.5).attr('stroke-dasharray', '3,2')
-      // Front grid line
-      g.append('line')
-        .attr('x1', 0).attr('y1', y)
-        .attr('x2', iw).attr('y2', y)
-        .attr('stroke', '#e2e8f0').attr('stroke-width', 0.5).attr('stroke-dasharray', '3,2')
-      // Connecting left side
-      g.append('line')
-        .attr('x1', 0).attr('y1', y)
-        .attr('x2', DX).attr('y2', y + DY)
-        .attr('stroke', '#e2e8f0').attr('stroke-width', 0.5)
-      g.append('text').attr('x', -3).attr('y', y)
+      g.append('line').attr('x1', 0).attr('x2', iw).attr('y1', y).attr('y2', y)
+        .attr('stroke', '#e2e8f0').attr('stroke-width', 0.6).attr('stroke-dasharray', '3,2')
+      g.append('text').attr('x', -4).attr('y', y)
         .attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
         .style('font-size', '6.5px').style('fill', '#9ca3af').text(t)
     })
 
-    // Baseline connector
-    g.append('line').attr('x1', 0).attr('y1', baseline).attr('x2', DX).attr('y2', baseline + DY)
-      .attr('stroke', '#d1d5db').attr('stroke-width', 0.8)
-    g.append('line').attr('x1', DX).attr('y1', baseline + DY).attr('x2', iw + DX).attr('y2', baseline + DY)
+    // Baseline
+    g.append('line').attr('x1', 0).attr('x2', iw).attr('y1', baseline).attr('y2', baseline)
       .attr('stroke', '#d1d5db').attr('stroke-width', 0.8)
 
-    const pts = (arr: Array<[number, number]>) => arr.map(([x, y]) => `${x},${y}`).join(' ')
     const hasActive = !!(highlightValues?.length || selectedValue)
 
     data.forEach((d, i) => {
       const isHl = !!(highlightValues?.some(p => d.label === p || d.label.startsWith(p)))
       const isSel = selectedValue === d.label
       const active = isHl || isSel
-      // very aggressive fade for non-selected bars so the selected one "pops"
-      const opacity = hasActive && !active ? 0.09 : 1
+      const opacity = hasActive && !active ? 0.1 : 1
 
       const x0 = gapUnit * (i + 1) + bw * i
       const bh = Math.max(1, (d.value / maxV) * ih)
       const y0 = baseline - bh
+      const fill = active ? d3.rgb(color).brighter(0.25).formatHex() : color
 
-      const frontFill = active ? d3.rgb(color).brighter(0.3).formatHex() : color
-      const topFill = d3.rgb(color).brighter(0.6).formatHex()
-      const rightFill = d3.rgb(color).darker(0.5).formatHex()
-
-      // Group all three faces so click + animation apply to the whole bar
       const barG = g.append('g')
         .attr('class', isSel ? 'bar3d-sel' : '')
         .attr('opacity', opacity)
         .style('cursor', onSelect ? 'pointer' : 'default')
         .on('click', () => onSelect?.(isSel ? null : d.label))
 
-      // Right face
-      barG.append('polygon')
-        .attr('points', pts([[x0+bw, y0],[x0+bw+DX, y0+DY],[x0+bw+DX, baseline+DY],[x0+bw, baseline]]))
-        .attr('fill', rightFill)
+      barG.append('rect')
+        .attr('x', x0).attr('y', y0).attr('width', bw).attr('height', bh)
+        .attr('fill', fill).attr('rx', 2)
 
-      // Front face
-      barG.append('polygon')
-        .attr('points', pts([[x0, y0],[x0+bw, y0],[x0+bw, baseline],[x0, baseline]]))
-        .attr('fill', frontFill)
-
-      // Top face
-      barG.append('polygon')
-        .attr('points', pts([[x0, y0],[x0+DX, y0+DY],[x0+bw+DX, y0+DY],[x0+bw, y0]]))
-        .attr('fill', topFill)
-
-      // Value label
       if (d.value > 0) {
         g.append('text')
-          .attr('x', x0 + bw / 2 + DX / 2).attr('y', y0 + DY - 4)
+          .attr('x', x0 + bw / 2).attr('y', y0 - 3)
           .attr('text-anchor', 'middle')
-          .style('font-size', '7.5px')
-          .style('font-weight', active ? '800' : '500')
+          .style('font-size', '7.5px').style('font-weight', active ? '800' : '500')
           .style('fill', active ? d3.rgb(color).darker(0.15).formatHex() : '#94a3b8')
           .style('opacity', hasActive && !active ? 0.3 : 1)
           .attr('pointer-events', 'none')
           .text(d.value)
       }
 
-      // X-axis label
       const shortLabel = d.label === '/' ? '/' : d.label.split('/').filter(Boolean).pop()?.slice(0, 12) ?? d.label
       g.append('text')
-        .attr('x', x0 + bw / 2).attr('y', baseline + 9)
+        .attr('x', x0 + bw / 2).attr('y', baseline + 8)
         .attr('text-anchor', 'middle')
-        .attr('transform', `rotate(-22, ${x0 + bw / 2}, ${baseline + 9})`)
-        .style('font-size', '7.5px')
-        .style('font-weight', active ? '800' : '500')
+        .attr('transform', `rotate(-22, ${x0 + bw / 2}, ${baseline + 8})`)
+        .style('font-size', '7.5px').style('font-weight', active ? '800' : '500')
         .style('fill', active ? d3.rgb(color).darker(0.1).formatHex() : '#4b5563')
         .style('opacity', hasActive && !active ? 0.4 : 1)
         .style('cursor', onSelect ? 'pointer' : 'default')

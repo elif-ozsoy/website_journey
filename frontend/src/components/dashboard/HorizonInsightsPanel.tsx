@@ -106,7 +106,7 @@ export default function HorizonInsightsPanel({
     for (const task of compareAnalysis.task_analyses) {
       if (task.difficulty === 'low') continue
       const severity: 'high' | 'medium' = task.difficulty === 'high' ? 'high' : 'medium'
-      for (const raw of [...(task.pain_points ?? []), ...(task.recommendations ?? [])]) {
+      for (const raw of [...task.pain_points, ...task.recommendations]) {
         const item = raw as ActionPointItem
         // Show points that explicitly reference the horizon diagram, OR that
         // are agent_gap / human_issue — timing differences between AI and human
@@ -218,10 +218,6 @@ export default function HorizonInsightsPanel({
           {/* ── Action point context card (from "Verify in diagrams" link) ── */}
           {actionContext && (
             <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button
-                onClick={onClearActionContext}
-                style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 'var(--fs-small)', color: 'var(--gray500)', fontWeight: 600, padding: '0 0 2px' }}
-              >← All insights</button>
               {actionContext.note && (
                 <div style={{ background: 'var(--surface)', border: '1.5px solid var(--brand)', borderRadius: 8, padding: '10px 12px' }}>
                   <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--brand)', marginBottom: 6 }}>Action Point</div>
@@ -256,64 +252,35 @@ export default function HorizonInsightsPanel({
             </div>
           )}
 
+          <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {actionPoints.map((pt, i) => {
-            const badge = pt.type ? BADGE_MAP[pt.type] : null
             const explanation = explanations[pt.id]
             const isLoading = expLoading[pt.id]
-
             return (
-              <div key={pt.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--gray100)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{
-                    fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: 99, flexShrink: 0,
-                    background: pt.severity === 'high' ? '#fee2e2' : '#fef3c7',
-                    color: pt.severity === 'high' ? '#b91c1c' : '#d97706',
-                  }}>
-                    {pt.severity.toUpperCase()}
-                  </span>
-                  <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div key={pt.id} style={{ borderRadius: 8, border: '1px solid var(--border)', background: 'var(--white)', overflow: 'hidden', flexShrink: 0 }}>
+                <div style={{ padding: '7px 12px', background: 'var(--gray50)', borderBottom: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
                     {pt.taskTitle}
                   </span>
                 </div>
-
-                <p style={{ margin: 0, fontSize: 'var(--fs-small)', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.5 }}>
-                  {i + 1}. {pt.text}
-                </p>
-
-                {badge && (
-                  <span style={{
-                    alignSelf: 'flex-start', fontSize: '10px', fontWeight: 700, letterSpacing: '0.04em',
-                    textTransform: 'uppercase', padding: '2px 7px', borderRadius: 99,
-                    background: badge.bg, color: badge.color,
-                  }}>
-                    {badge.label}
-                  </span>
-                )}
-
-                <div style={{ padding: '8px 10px', borderRadius: 6, background: 'var(--gray50)', border: '1px solid var(--gray100)' }}>
-                  <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--gray400)', marginBottom: 5 }}>
-                    What to look for in the graph
-                  </div>
+                <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                    {i + 1}. {pt.text}
+                  </p>
                   {isLoading ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-small)', color: 'var(--gray400)' }}>
                       <Spinner size={9} /> Analysing…
                     </div>
                   ) : explanation ? (
-                    <p style={{
-                      margin: 0, fontSize: 'var(--fs-small)', color: 'var(--brand)', lineHeight: 1.5,
-                      borderLeft: '2px solid var(--brand)', paddingLeft: 7,
-                    }}>
+                    <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--brand)', lineHeight: 1.5, borderLeft: '2px solid var(--brand)', paddingLeft: 7 }}>
                       {explanation}
                     </p>
-                  ) : (
-                    <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontStyle: 'italic', lineHeight: 1.5 }}>
-                      Look for strips with heavy activity (dark bands) at the time position where this issue likely occurs.
-                    </p>
-                  )}
+                  ) : null}
                 </div>
               </div>
             )
           })}
+          </div>
 
           <div style={{ flex: 1 }} />
         </div>

@@ -58,18 +58,16 @@ function derivePoints(analysis: ComparativeAnalysis): Omit<ActionPoint, 'status'
     const diff = task.difficulty as 'high' | 'medium' | 'low'
     const severity: 'high' | 'medium' = diff === 'high' ? 'high' : 'medium'
     let hasPainPoints = false
-    const painPoints = task.pain_points ?? []
-    for (let i = 0; i < painPoints.length; i++) {
-      const item = toItem(painPoints[i] as ActionPointItem | string)
+    for (let i = 0; i < task.pain_points.length; i++) {
+      const item = toItem(task.pain_points[i] as ActionPointItem | string)
       if (!item.text.trim()) continue
       pts.push({ id: `pp_${task.task_title}_${i}`, item, type: 'pain_point', task, severity, ppIndex: i })
       hasPainPoints = true
     }
     // Fall back to recommendations when a task has no pain points
     if (!hasPainPoints) {
-      const recommendations = task.recommendations ?? []
-      for (let i = 0; i < recommendations.length; i++) {
-        const item = toItem(recommendations[i] as ActionPointItem | string)
+      for (let i = 0; i < task.recommendations.length; i++) {
+        const item = toItem(task.recommendations[i] as ActionPointItem | string)
         if (!item.text.trim()) continue
         pts.push({ id: `rec_${task.task_title}_${i}`, item, type: 'recommendation', task, severity, ppIndex: i })
       }
@@ -531,17 +529,22 @@ export default function ActionPointsList({
         <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-primary)', flexShrink: 0 }}>Action Points</span>
 
         <button
-          onClick={onRerunAnalysis}
-          disabled={compareLoading}
+          onClick={() => {
+            if (compareLoading) {
+              if (window.confirm('Analysis is still running. Start over from scratch?')) onRerunAnalysis()
+            } else {
+              onRerunAnalysis()
+            }
+          }}
           title="Re-run the comparative analysis from scratch"
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0,
             padding: '3px 10px', borderRadius: 99, border: '1px solid var(--border)',
             background: 'var(--surface)', color: 'var(--brand)', fontSize: 'var(--fs-small)',
-            fontWeight: 700, cursor: compareLoading ? 'not-allowed' : 'pointer',
+            fontWeight: 700, cursor: 'pointer',
           }}
         >
-          {compareLoading ? <><Spinner size={9} /> Re-running…</> : '↻ Re-run'}
+          {compareLoading ? <><Spinner size={9} /> Analysing…</> : '↻ Re-run'}
         </button>
 
         {openCount === 0 && points.length > 0 && <span style={{ fontSize: 'var(--fs-small)', color: 'var(--accent)', fontWeight: 600, flexShrink: 0 }}>all resolved ✓</span>}

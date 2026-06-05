@@ -221,11 +221,12 @@ def get_comparative_analysis(
     return json.loads(record.analysis_json)
 
 
-@router.post("/sites/{site_id}/comparative-analysis")
+@router.post("/sites/{site_id}/comparative-analysis", status_code=202)
 def comparative_analysis(
     site_id: str,
     body: ComparativeAnalysisRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """
@@ -326,35 +327,41 @@ def comparative_analysis(
     if not journey_dicts:
         raise HTTPException(status_code=404, detail="No journeys found for this site")
 
-    try:
-        anthropic_key = request.headers.get("x-anthropic-key") or None
-        agent_api_key = request.headers.get("x-agent-api-key") or None
-        agent_provider = request.headers.get("x-agent-provider") or None
-        result = run_comparative_analysis(
-            site_obj.target_url,
-            journey_dicts,
-            api_key=anthropic_key,
-            agent_api_key=agent_api_key,
-            agent_provider=agent_provider,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    # ── Persist result so it isn't recomputed on every page visit ────────────
+    anthropic_key = request.headers.get("x-anthropic-key") or None
+    agent_api_key = request.headers.get("x-agent-api-key") or None
+    agent_provider = request.headers.get("x-agent-provider") or None
     version_id = body.version_id or "v1"
-    try:
-        existing = (
-            db.query(SiteAnalysis)
-            .filter(SiteAnalysis.site_id == site_id, SiteAnalysis.version_id == version_id)
-            .first()
-        )
-        result_json = json.dumps(result)
-        if existing:
-            existing.analysis_json = result_json
-        else:
-            db.add(SiteAnalysis(site_id=site_id, version_id=version_id, analysis_json=result_json))
-        db.commit()
-    except Exception:
-        db.rollback()  # non-fatal — still return the result
 
-    return result
+    from db.session import SessionLocal
+
+    def _run_and_save():
+        try:
+            result = run_comparative_analysis(
+                site_obj.target_url,
+                journey_dicts,
+                api_key=anthropic_key,
+                agent_api_key=agent_api_key,
+                agent_provider=agent_provider,
+            )
+        except Exception:
+            return
+        bg_db = SessionLocal()
+        try:
+            existing = (
+                bg_db.query(SiteAnalysis)
+                .filter(SiteAnalysis.site_id == site_id, SiteAnalysis.version_id == version_id)
+                .first()
+            )
+            result_json = json.dumps(result)
+            if existing:
+                existing.analysis_json = result_json
+            else:
+                bg_db.add(SiteAnalysis(site_id=site_id, version_id=version_id, analysis_json=result_json))
+            bg_db.commit()
+        except Exception:
+            bg_db.rollback()
+        finally:
+            bg_db.close()
+
+    background_tasks.add_task(_run_and_save)
+    return {"status": "running"}

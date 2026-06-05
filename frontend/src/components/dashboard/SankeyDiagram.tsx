@@ -281,7 +281,7 @@ const MILESTONE_CODE: Record<Milestone, string> = {
 const TERMINAL_COLORS: Partial<Record<Milestone, string>> = {
   'done': '#027b2ebe',        // green
   'failed': '#dc2626',      // red
-  'incomplete': '#f59e0b',  // amber
+  'incomplete': '#3b82f6',
   'detail-view': '#3c1580',  
   'nav': '#3c1580',
   'scroll': '#3c1580',
@@ -1142,7 +1142,7 @@ export default function SankeyDiagram({
       .attr('cx', (d: any) => d.x1 + 4)
       .attr('cy', (d: any) => d.y0 - 2)
       .attr('r', 7)
-      .attr('fill', '#f59e0b')
+      .attr('fill', '#3b82f6')
       .attr('stroke', '#fff')
       .attr('stroke-width', 1.5)
       .attr('pointer-events', 'none')
@@ -1217,7 +1217,7 @@ export default function SankeyDiagram({
       })
       g.selectAll('rect')
         .attr('opacity', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? 1 : DIM_OPACITY))
-        .attr('stroke', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? '#f59e0b' : 'none'))
+        .attr('stroke', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? '#3b82f6' : 'none'))
         .attr('stroke-width', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? 3 : 0))
     } else {
       const focusKindInit = highlight?.side === 'ai' ? 'agent' : highlight?.side === 'human' ? 'human' : null
@@ -1266,7 +1266,7 @@ export default function SankeyDiagram({
       })
       svg.selectAll<SVGRectElement, NodeDatum>('rect')
         .attr('opacity', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? 1 : DIM_OPACITY))
-        .attr('stroke', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? '#f59e0b' : 'none'))
+        .attr('stroke', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? '#3b82f6' : 'none'))
         .attr('stroke-width', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? 3 : 0))
       return
     }
@@ -1343,7 +1343,7 @@ export default function SankeyDiagram({
           {highlight?.focus === 'divergence' && divergentNodeIds.size > 0 && (
             <span style={{
               fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
-              background: '#fef3c7', color: '#b45309', border: '1px solid #f59e0b',
+              background: '#dbeafe', color: '#1d4ed8', border: '1px solid #93c5fd',
             }}>
               ⚡ Divergence points highlighted
             </span>

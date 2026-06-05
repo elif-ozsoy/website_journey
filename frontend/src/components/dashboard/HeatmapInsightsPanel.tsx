@@ -115,7 +115,7 @@ export default function HeatmapInsightsPanel({
       if (task.difficulty === 'low') continue
       if (activeTaskTitle && task.task_title !== activeTaskTitle) continue
       const severity: 'high' | 'medium' = task.difficulty === 'high' ? 'high' : 'medium'
-      for (const raw of [...(task.pain_points ?? []), ...(task.recommendations ?? [])]) {
+      for (const raw of [...task.pain_points, ...task.recommendations]) {
         const item = raw as ActionPointItem
         const heatmapRef = item.diagrams?.find(d => d.view === 'heatmap')
         if (!heatmapRef) continue
@@ -233,78 +233,40 @@ export default function HeatmapInsightsPanel({
           )}
 
           {/* Action point cards */}
+          <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {allPoints.map((pt, i) => {
-            const badge = pt.type ? BADGE_MAP[pt.type] : null
             const isHighlighted = !!(highlightText && pt.text === highlightText)
             return (
               <div
                 key={pt.id}
                 ref={isHighlighted ? highlightRef : undefined}
                 style={{
-                  padding: '12px 16px', borderBottom: '1px solid var(--gray100)',
-                  display: 'flex', flexDirection: 'column', gap: 6,
-                  background: isHighlighted ? '#fffbeb' : undefined,
-                  outline: isHighlighted ? '2px solid #f59e0b' : undefined,
-                  outlineOffset: isHighlighted ? '-2px' : undefined,
-                  borderRadius: isHighlighted ? 4 : undefined,
-                  transition: 'background 0.3s, outline 0.3s',
+                  borderRadius: 8, border: isHighlighted ? '2px solid #3b82f6' : '1px solid var(--border)',
+                  background: isHighlighted ? '#eff6ff' : 'var(--white)',
+                  overflow: 'hidden', flexShrink: 0,
+                  transition: 'background 0.3s, border-color 0.3s',
                 }}
               >
-                {/* From Overview banner */}
-                {isHighlighted && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#d97706', background: '#fef3c7', padding: '2px 7px', borderRadius: 99 }}>
-                      ↩ From Overview
-                    </span>
-                    <button
-                      onClick={onClearHighlight}
-                      style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--gray400)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', lineHeight: 1 }}
-                    >✕</button>
-                  </div>
-                )}
-                {/* Severity + task */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{
-                    fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: 99, flexShrink: 0,
-                    background: pt.severity === 'high' ? '#fee2e2' : '#fef3c7',
-                    color: pt.severity === 'high' ? '#b91c1c' : '#d97706',
-                  }}>
-                    {pt.severity.toUpperCase()}
-                  </span>
+                <div style={{ padding: '7px 12px', background: 'var(--gray50)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {pt.taskTitle}
                   </span>
+                  {isHighlighted && (
+                    <button onClick={onClearHighlight} style={{ fontSize: '10px', color: 'var(--gray400)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', lineHeight: 1, flexShrink: 0 }}>✕</button>
+                  )}
                 </div>
-
-                {/* Action point text */}
-                <p style={{ margin: 0, fontSize: 'var(--fs-small)', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.5 }}>
-                  {i + 1}. {pt.text}
-                </p>
-
-                {badge && (
-                  <span style={{
-                    alignSelf: 'flex-start', fontSize: '10px', fontWeight: 700, letterSpacing: '0.04em',
-                    textTransform: 'uppercase', padding: '2px 7px', borderRadius: 99,
-                    background: badge.bg, color: badge.color,
-                  }}>
-                    {badge.label}
-                  </span>
-                )}
-
-                {/* Heatmap-specific context (if available) */}
-                {pt.heatmapReason && (
-                  <div style={{ padding: '8px 10px', borderRadius: 6, background: 'var(--gray50)', border: '1px solid var(--gray100)' }}>
-                    <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--gray400)', marginBottom: 4 }}>
-                      What to look for in the heatmap
-                    </div>
-                    <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.5 }}>
-                      {pt.heatmapReason}
-                    </p>
-                  </div>
-                )}
+                <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                    {i + 1}. {pt.text}
+                  </p>
+                  {pt.heatmapReason && (
+                    <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray500)', lineHeight: 1.5 }}>{pt.heatmapReason}</p>
+                  )}
+                </div>
               </div>
             )
           })}
+          </div>
 
           <div style={{ flex: 1 }} />
         </div>

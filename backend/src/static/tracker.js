@@ -24,7 +24,7 @@
     (document.head || document.documentElement).appendChild(s);
   })();
 
-  var _OUR_IDS = ["__ux_task_overlay", "__ux_tracker_banner", "__ux_rating_widget", "__ux_click_highlight"];
+  var _OUR_IDS = ["__ux_task_overlay", "__ux_tracker_banner", "__ux_rating_widget"];
 
   function _isOurElement(el) {
     while (el && el !== document.body) {
@@ -60,10 +60,7 @@
         height: window.innerHeight,
         windowWidth: window.innerWidth,
         windowHeight: window.innerHeight,
-        ignoreElements: function (el) {
-          if (el.id === "__ux_click_highlight") return true; // always exclude highlight from dom_change shots
-          return _isOurElement(el);
-        },
+        ignoreElements: function (el) { return _isOurElement(el); },
       }).then(function (canvas) {
         canvas.toBlob(function (blob) {
           if (!blob) return;
@@ -84,30 +81,11 @@
     }
   }
 
-  // ── Per-click viewport screenshot with element highlight ─────────────────
-  // Captures the current viewport with a red border drawn around the clicked
-  // element, so the screenshot is tied to the specific action via action_id.
+  // ── Per-click viewport screenshot ────────────────────────────────────────
   function captureClickScreenshot(actionId, rect) {
     var capturePath = location.pathname + location.search;
-    var pad = 3;
-    var highlight = document.createElement("div");
-    highlight.id = "__ux_click_highlight";
-    highlight.style.cssText = [
-      "position:fixed",
-      "pointer-events:none",
-      "z-index:2147483646",
-      "border:3px solid rgba(255,64,64,0.9)",
-      "background:rgba(255,64,64,0.18)",
-      "border-radius:3px",
-      "box-sizing:border-box",
-      "left:" + Math.max(0, rect.left - pad) + "px",
-      "top:" + Math.max(0, rect.top - pad) + "px",
-      "width:" + Math.max(10, rect.width + pad * 2) + "px",
-      "height:" + Math.max(10, rect.height + pad * 2) + "px",
-    ].join(";");
 
     function doClickCapture() {
-      if (document.body) document.body.appendChild(highlight);
       requestAnimationFrame(function () {
         window.html2canvas(document.documentElement, {
           useCORS: true,
@@ -120,12 +98,8 @@
           height: window.innerHeight,
           windowWidth: window.innerWidth,
           windowHeight: window.innerHeight,
-          ignoreElements: function (el) {
-            if (el.id === "__ux_click_highlight") return false; // include highlight
-            return _isOurElement(el);
-          },
+          ignoreElements: function (el) { return _isOurElement(el); },
         }).then(function (canvas) {
-          if (highlight.parentNode) highlight.parentNode.removeChild(highlight);
           canvas.toBlob(function (blob) {
             if (!blob) return;
             var fd = new FormData();
@@ -137,9 +111,7 @@
             fd.append("image", blob, "screenshot.png");
             (window.__ux_fetch || window.fetch)(API_BASE + "/api/screenshot", { method: "POST", body: fd }).catch(function () {});
           }, "image/png");
-        }).catch(function () {
-          if (highlight.parentNode) highlight.parentNode.removeChild(highlight);
-        });
+        }).catch(function () {});
       });
     }
 

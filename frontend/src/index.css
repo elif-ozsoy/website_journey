@@ -2176,8 +2176,7 @@ a.dash-topbar-project-name:hover { color: var(--accent); }
 /* ─── PROJECT DASHBOARD (sidebar layout) ─────────── */
 .proj-dash-layout {
   display: flex;
-  flex: 1;
-  min-height: 0;
+  height: 100vh;
   overflow: hidden;
   background: var(--white);
 }

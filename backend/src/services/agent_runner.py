@@ -108,7 +108,7 @@ def _build_llm(llm_provider: str, api_key: str, model: str | None):
             model=model or "meta/llama-4-maverick-17b-128e-instruct",
             api_key=api_key,
             base_url="https://integrate.api.nvidia.com/v1",
-            timeout=120,
+            timeout=300,
         )
 
     if llm_provider == "google":
@@ -116,7 +116,7 @@ def _build_llm(llm_provider: str, api_key: str, model: str | None):
         ChatGoogle = getattr(browser_use_mod, "ChatGoogle")
 
         return ChatGoogle(
-            model=model or "gemini-2.0-flash",
+            model=model or "gemini-2.5-flash",
             api_key=api_key,
         )
 
@@ -269,8 +269,8 @@ async def run_browser_agent(
         use_vision=True,
         use_judge=False,
         max_history_items=10,
-        max_failures=3,
-        llm_timeout=120,
+        max_failures=5,
+        llm_timeout=300,
         max_actions_per_step=1,
         save_conversation_path=save_conversation_path,
         extend_system_message=extend_system_message,
@@ -283,7 +283,7 @@ async def run_browser_agent(
 
     run_start = time.time()
     try:
-        history = await agent.run(max_steps=20)
+        history = await agent.run(max_steps=50)
         await status_callback("Processing results...")
         history_items = history.history if hasattr(history, "history") else list(history)
     except Exception as e:

@@ -15,6 +15,8 @@ export default defineConfig(({ mode }) => {
           target: backendUrl,
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, ''),
+          timeout: 600000,
+          proxyTimeout: 600000,
         },
         '/ws': {
           target: backendUrl,
