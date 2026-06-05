@@ -31,10 +31,10 @@ interface Props {
 }
 
 const AGENT_PALETTE = [
-  '#4f46e5', '#7c3aed', '#0ea5e9', '#2563eb', '#a855f7', '#6366f1',
+  '#4f46e5', '#2563eb', '#7c3aed', '#1d4ed8', '#a855f7', '#0ea5e9',
 ]
 const HUMAN_PALETTE = [
-  '#0891b2', '#0e7490', '#0284c7', '#0369a1', '#0d9488', '#155e75',
+  '#10b981', '#059669', '#14b8a6', '#0d9488', '#22c55e', '#047857',
 ]
 function colorForJourney(kind: 'agent' | 'human', index: number): string {
   const palette = kind === 'agent' ? AGENT_PALETTE : HUMAN_PALETTE
@@ -56,13 +56,13 @@ const TEXT_LABEL = '#475569'
 const BORDER     = '#e2e8f0'
 
 const STEP_ACTION_COLORS: Record<string, string> = {
-  click_element: '#185FA5',
-  input_text:    '#059669',
-  go_to_url:     '#d97706',
-  scroll:        '#0891b2',
-  go_back:       '#f43f5e',
-  extract_content: '#7c3aed',
-  done:          '#16a34a',
+  click_element:   '#4f46e5',  // indigo — primary interaction (agent palette)
+  input_text:      '#0d9488',  // teal — data entry (human palette)
+  go_to_url:       '#0284c7',  // sky — navigation
+  scroll:          '#64748b',  // slate — passive movement
+  go_back:         '#e11d48',  // rose — backward/undo
+  extract_content: '#7c3aed',  // violet — AI extraction (agent palette)
+  done:            '#16a34a',  // green — success
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

@@ -51,13 +51,13 @@ const TEXT_LABEL  = '#475569'
 const BORDER      = '#e2e8f0'
 
 const STEP_ACTION_COLORS: Record<string, string> = {
-  click_element: '#185FA5',
-  input_text:    '#059669',
-  go_to_url:     '#d97706',
-  scroll:        '#0891b2',
-  go_back:       '#f43f5e',
-  extract_content: '#7c3aed',
-  done:          '#16a34a',
+  click_element:   '#4f46e5',  // indigo — primary interaction (agent palette)
+  input_text:      '#0d9488',  // teal — data entry (human palette)
+  go_to_url:       '#0284c7',  // sky — navigation
+  scroll:          '#64748b',  // slate — passive movement
+  go_back:         '#e11d48',  // rose — backward/undo
+  extract_content: '#7c3aed',  // violet — AI extraction (agent palette)
+  done:            '#16a34a',  // green — success
 }
 
 const DIM_OPACITY = 0.10
@@ -270,17 +270,14 @@ const MILESTONE_CODE: Record<Milestone, string> = {
   'other': '·',
 }
 
-/* Special colors for terminal milestones. Override nodeColor() and pattern-
- * chip background for these. */
+/* Special colors for terminal milestones only. Intermediate milestones
+ * (start, page, nav, scroll, detail-view) are intentionally omitted so
+ * nodeColor() picks up the natural agent-indigo / human-green / slate-for-mixed
+ * color — keeping node sticks coherent with the ribbon colors. */
 const TERMINAL_COLORS: Partial<Record<Milestone, string>> = {
-  'done': '#16a34a',        // green
-  'failed': '#dc2626',      // red
-  'incomplete': '#f59e0b',  // amber
-  'detail-view': '#3c1580',  
-  'nav': '#3c1580',
-  'scroll': '#3c1580',
-  'start': '#3c1580',
-  'page': '#3c1580',
+  'done':       '#16a34a',  // green — success
+  'failed':     '#dc2626',  // red — error
+  'incomplete': '#f59e0b',  // amber — partial
 }
 
 /* Heuristics — kept simple and explainable. These work well for the
@@ -922,7 +919,7 @@ export default function SankeyDiagram({
     () => new Set(divergences.map(d => d.nodeId)),
     [divergences],
   )
-  const [showDivergencePanel, setShowDivergencePanel] = useState(true)
+  const [showDivergencePanel, setShowDivergencePanel] = useState(false)
 
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [hoverJourneyId, setHoverJourneyId] = useState<string | null>(null)
@@ -1259,20 +1256,13 @@ export default function SankeyDiagram({
                     {d.groups.map((g, gi) => (
                       <div key={gi} style={{
                         fontSize: '0.7rem', color: TEXT_DARK,
-                        display: 'flex', alignItems: 'flex-start', gap: 6,
+                        display: 'flex', alignItems: 'baseline', gap: 6,
                       }}>
                         <span style={{ color: '#b45309', fontWeight: 700, flexShrink: 0 }}>•</span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>
-                            "{truncate(g.label, 48)}"
-                          </span>
-                          <span style={{ color: TEXT_MUTED, marginLeft: 6 }}>
-                            ({g.visits.map(v => {
-                              const meta = journeyMap.get(v.journeyId)
-                              return meta?.label ?? v.journeyId
-                            }).join(', ')})
-                          </span>
-                        </div>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          "{truncate(g.label, 48)}"
+                        </span>
+                        <span style={{ color: TEXT_MUTED, flexShrink: 0 }}>({g.visits.length})</span>
                       </div>
                     ))}
                   </div>
