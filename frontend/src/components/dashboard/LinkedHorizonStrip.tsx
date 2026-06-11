@@ -150,7 +150,7 @@ export default function LinkedHorizonStrip({ width, marginLeft, active, cursorX 
   const popoverScreenLeft = anchor && cursorPx !== null
     ? Math.max(8, Math.min(window.innerWidth - POPOVER_W - 8, anchor.left + cursorPx - POPOVER_W / 2))
     : 0
-  const showPopover = !!active && cursorPx !== null && actionsAtCursor.length > 0 && !!anchor
+  const showPopover = !!active && cursorPx !== null && actionsAtCursor.length > 0 && !!anchor && localX !== null
 
   return (
     <div style={{ flexShrink: 0, borderTop: '1px solid #e2e8f0', background: '#fff', position: 'relative' }}>
