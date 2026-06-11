@@ -13,8 +13,8 @@ interface Props {
   rightControl?: ReactNode
 }
 
-const AGENT_COLOR = '#32494B'
-const HUMAN_COLOR = '#881342'
+const AGENT_COLOR = '#0072B2'
+const HUMAN_COLOR = '#E69F00'
 
 /* ── Overlay chart constants ── */
 const CHART_PAD = { top: 22, right: 20, bottom: 34, left: 16 }

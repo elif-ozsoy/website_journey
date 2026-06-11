@@ -17,8 +17,8 @@ const CANVAS_H_4 = Y_PREV + NODE_H + 52
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 2.5
 
-const HUMAN_COLOR = '#881342'
-const AI_COLOR    = '#32494B'
+const HUMAN_COLOR = '#E69F00'
+const AI_COLOR    = '#0072B2'
 const PREV_COLOR  = '#6b7280'
 
 // Hamming threshold for "same state": ≤12 bits differ out of 256 (≈95% similarity)

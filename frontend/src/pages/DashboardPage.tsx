@@ -217,9 +217,9 @@ function SettingsPanel({
           <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
             <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: 9 }}>AI Agents</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              <FilterPill label="All" active={agentAllSelected} color="#32494B" onClick={onSelectAllAgents} />
+              <FilterPill label="All" active={agentAllSelected} color="#0072B2" onClick={onSelectAllAgents} />
               {agentOptions.map(o => (
-                <FilterPill key={o.id} label={o.name} active={agentAllSelected || agentFilter!.has(o.id)} color="#32494B" onClick={() => onToggleAgent(o.id)} />
+                <FilterPill key={o.id} label={o.name} active={agentAllSelected || agentFilter!.has(o.id)} color="#0072B2" onClick={() => onToggleAgent(o.id)} />
               ))}
               {agentOptions.length === 0 && <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-muted)' }}>No agents run yet</span>}
             </div>
@@ -227,9 +227,9 @@ function SettingsPanel({
           <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
             <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: 9 }}>Human Sessions</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              <FilterPill label="All" active={sessionAllSelected} color="#881342" onClick={onSelectAllSessions} />
+              <FilterPill label="All" active={sessionAllSelected} color="#E69F00" onClick={onSelectAllSessions} />
               {sessionOptions.map((o, i) => (
-                <FilterPill key={o.id} label={`User ${i + 1}`} active={sessionAllSelected || sessionFilter!.has(o.id)} color="#881342" onClick={() => onToggleSession(o.id)} />
+                <FilterPill key={o.id} label={`User ${i + 1}`} active={sessionAllSelected || sessionFilter!.has(o.id)} color="#E69F00" onClick={() => onToggleSession(o.id)} />
               ))}
               {sessionOptions.length === 0 && <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-muted)' }}>No sessions yet</span>}
             </div>
@@ -238,8 +238,8 @@ function SettingsPanel({
             <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
               <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: 9 }}>Trajectories</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                <FilterPill label="Human" active={aggTrajectories.showHuman} color="#881342" onClick={() => onToggleAggTrajectory('human')} />
-                <FilterPill label="AI" active={aggTrajectories.showAi} color="#32494B" onClick={() => onToggleAggTrajectory('ai')} />
+                <FilterPill label="Human" active={aggTrajectories.showHuman} color="#E69F00" onClick={() => onToggleAggTrajectory('human')} />
+                <FilterPill label="AI" active={aggTrajectories.showAi} color="#0072B2" onClick={() => onToggleAggTrajectory('ai')} />
                 {prevVersionLabel && (
                   <FilterPill label={prevVersionLabel} active={aggTrajectories.showPrev} color="#6b7280" onClick={() => onToggleAggTrajectory('prev')} />
                 )}
@@ -1274,12 +1274,12 @@ useEffect(() => {
         {activeView === 'human_vs_ai' && (() => {
           const legendBar = (
             <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: '#32494B' }}>
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#32494B' }} />
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: '#0072B2' }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#0072B2' }} />
                 AI
               </span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: '#881342' }}>
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#881342' }} />
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: '#E69F00' }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#E69F00' }} />
                 Human
               </span>
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>{filtersControl}</div>

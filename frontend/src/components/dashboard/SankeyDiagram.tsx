@@ -31,25 +31,25 @@ interface Props {
  * If you really want themed colors, switch these to .style('fill', ...) and
  * use real CSS classes — but hex keeps things simple and reliable.
  */
-const AGENT_COLOR = '#32494B'
-const HUMAN_COLOR = '#881342'
+const AGENT_COLOR = '#0072B2'
+const HUMAN_COLOR = '#E69F00'
 
 const AGENT_PALETTE = [
-  '#32494B',
-  '#3d5b5d',
-  '#496e70',
-  '#558183',
-  '#619496',
-  '#6da7a9',
+  '#0072B2',
+  '#1a85c8',
+  '#3399de',
+  '#4dadf4',
+  '#66c0ff',
+  '#80d4ff',
 ]
 
 const HUMAN_PALETTE = [
-  '#881342',
-  '#9e1852',
-  '#b41e62',
-  '#ca2472',
-  '#e02a82',
-  '#f63092',
+  '#E69F00',
+  '#f0b020',
+  '#f5c040',
+  '#f9d060',
+  '#fde080',
+  '#fff0a0',
 ]
 function colorForJourney(kind: 'agent' | 'human', index: number): string {
   const palette = kind === 'agent' ? AGENT_PALETTE : HUMAN_PALETTE

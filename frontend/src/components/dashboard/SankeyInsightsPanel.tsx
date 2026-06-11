@@ -4,8 +4,8 @@ import * as api from '../../lib/api'
 import type { AgentStep } from '../agent/agentTypes'
 import type { NodeDivergence } from './SankeyDiagram'
 
-const AGENT_COLOR = '#185FA5'
-const HUMAN_COLOR = '#0d9488'
+const AGENT_COLOR = '#0072B2'
+const HUMAN_COLOR = '#E69F00'
 
 interface SankeyActionPoint {
   id: string
