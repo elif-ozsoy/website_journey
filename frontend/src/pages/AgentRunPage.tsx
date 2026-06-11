@@ -218,9 +218,9 @@ export default function AgentRunPage() {
                         }}>
                           <div style={{
                             fontWeight: 700, fontSize: 'var(--fs-body)',
-                            color: solutionEval.result === 'correct' ? '#15803d'
+                            color: solutionEval.result === 'correct' ? '#009E73'
                                  : solutionEval.result === 'partially_correct' ? '#b45309'
-                                 : '#b91c1c',
+                                 : '#D55E00',
                           }}>
                             {solutionEval.result === 'correct' ? '✓ Correct'
                              : solutionEval.result === 'partially_correct' ? '◑ Partially Correct'

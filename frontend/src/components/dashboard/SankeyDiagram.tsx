@@ -257,8 +257,8 @@ const MILESTONE_LABEL: Record<Milestone, string> = {
 /* Special colors for terminal milestones. Override nodeColor() and pattern-
  * chip background for these. */
 const TERMINAL_COLORS: Partial<Record<Milestone, string>> = {
-  'done':       '#15803d',   // deep green — readable label, not neon
-  'failed':     '#b91c1c',   // deep red
+  'done':       '#009E73',   // Okabe-Ito bluish-green — CVD-safe positive
+  'failed':     '#D55E00',   // Okabe-Ito vermillion — CVD-safe negative
   'incomplete': '#475569',
   'detail-view': '#4c3a6e',
   'nav':         '#4c3a6e',
