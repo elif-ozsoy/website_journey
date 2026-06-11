@@ -71,10 +71,10 @@ function Collapse({ label, children, defaultOpen = true }: { label: string; chil
   )
 }
 
-const AI_COLOR      = '#32494B'
-const HUMAN_COLOR   = '#881342'
-const AI_PALETTE    = ['#32494B','#3d5b5d','#496e70','#558183','#619496','#6da7a9']
-const HUMAN_PALETTE = ['#881342','#9e1852','#b41e62','#ca2472','#e02a82','#f63092']
+const AI_COLOR      = '#0072B2'
+const HUMAN_COLOR   = '#E69F00'
+const AI_PALETTE    = ['#0072B2', '#1a85c4', '#3398d6', '#4daae8', '#66b8f0', '#99d0f7']
+const HUMAN_PALETTE = ['#E69F00', '#f0b31a', '#f5c840', '#f8d966', '#fae88c', '#fdf2c0']
 const ACTION_TYPES  = ['click_element','input_text','scroll','navigate','extract_content','other']
 
 function getPath(url: string) {

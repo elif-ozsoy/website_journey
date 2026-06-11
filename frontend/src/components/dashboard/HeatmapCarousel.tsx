@@ -145,12 +145,12 @@ export default function HeatmapCarousel({ agentJourneys, humanJourneysBySession,
         <span style={{ width: 1, height: 14, background: 'var(--gray200)', flexShrink: 0 }} />
 
         {/* Legend */}
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: agentDotCount > 0 ? '#32494B' : 'var(--gray300)', flexShrink: 0 }}>
-          <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#32494B', display: 'inline-block', flexShrink: 0 }} />
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: agentDotCount > 0 ? '#0072B2' : 'var(--gray300)', flexShrink: 0 }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#0072B2', display: 'inline-block', flexShrink: 0 }} />
           Agent
         </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: humanDotCount > 0 ? '#881342' : 'var(--gray300)', flexShrink: 0 }}>
-          <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#881342', display: 'inline-block', flexShrink: 0 }} />
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: humanDotCount > 0 ? '#E69F00' : 'var(--gray300)', flexShrink: 0 }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#E69F00', display: 'inline-block', flexShrink: 0 }} />
           Human
         </span>
 

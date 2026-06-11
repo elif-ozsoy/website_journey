@@ -35,21 +35,21 @@ interface Props {
  */
 
 const AGENT_PALETTE = [
-  '#32494B',
-  '#3d5b5d',
-  '#496e70',
-  '#558183',
-  '#619496',
-  '#6da7a9',
+  '#0072B2',
+  '#1a85c4',
+  '#3398d6',
+  '#4daae8',
+  '#66b8f0',
+  '#99d0f7',
 ]
 
 const HUMAN_PALETTE = [
-  '#881342',
-  '#9e1852',
-  '#b41e62',
-  '#ca2472',
-  '#e02a82',
-  '#f63092',
+  '#E69F00',
+  '#f0b31a',
+  '#f5c840',
+  '#f8d966',
+  '#fae88c',
+  '#fdf2c0',
 ]
 function colorForJourney(kind: 'agent' | 'human', index: number): string {
   const palette = kind === 'agent' ? AGENT_PALETTE : HUMAN_PALETTE

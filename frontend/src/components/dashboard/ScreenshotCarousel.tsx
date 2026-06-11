@@ -70,7 +70,7 @@ function interpolateStops(t: number, stops: Array<[number, number, number]>, max
 }
 
 // Cool blue gradient: transparent → blue → cyan → green → yellow → red
-// Agent heatmap: dark teal (#32494B) family, cold→hot
+// Agent heatmap: blue (#0072B2) family, cold→hot
 function intensityToRgba(t: number): [number, number, number, number] {
   return interpolateStops(t, [
     [20, 40, 42],
@@ -81,7 +81,7 @@ function intensityToRgba(t: number): [number, number, number, number] {
   ])
 }
 
-// Human heatmap: deep rose (#881342) family, cold→hot
+// Human heatmap: orange (#E69F00) family, cold→hot
 function intensityToRgbaWarm(t: number): [number, number, number, number] {
   return interpolateStops(t, [
     [80, 10, 40],

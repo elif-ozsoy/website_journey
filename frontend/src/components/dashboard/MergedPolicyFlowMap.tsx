@@ -17,8 +17,8 @@ const CANVAS_H_4 = Y_PREV + NODE_H + 52
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 2.5
 
-const HUMAN_COLOR = '#881342'
-const AI_COLOR    = '#32494B'
+const HUMAN_COLOR = '#E69F00'
+const AI_COLOR    = '#0072B2'
 const PREV_COLOR  = '#6b7280'
 
 // Hamming threshold for "same state": ≤12 bits differ out of 256 (≈95% similarity)
@@ -565,7 +565,7 @@ export default function MergedPolicyFlowMap({
             : onRunHuman && <button onClick={onRunHuman} disabled={!taskTitle} style={btnStyle(HUMAN_COLOR, !taskTitle)}>{humanFlow?.length ? 'Re-run' : 'Run'}</button>
           }
           {(humanStatus || humanError) && (
-            <span style={{ fontSize: 'var(--fs-small)', color: humanError ? 'var(--red)' : '#881342' }}>
+            <span style={{ fontSize: 'var(--fs-small)', color: humanError ? 'var(--red)' : '#E69F00' }}>
               {humanLoading && <span className="inline-spinner" style={{ marginRight: 4 }} />}
               {humanError ?? humanStatus}
             </span>

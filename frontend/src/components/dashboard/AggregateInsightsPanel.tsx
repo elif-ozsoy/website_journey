@@ -138,9 +138,9 @@ export default function AggregateInsightsPanel({
             <SectionLabel>Lanes</SectionLabel>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
               {([
-                { color: '#881342', label: 'Human', desc: 'states only the human-steered policy visited (top)' },
+                { color: '#E69F00', label: 'Human', desc: 'states only the human-steered policy visited (top)' },
                 { color: '#a855f7', label: 'Shared', desc: 'states visited by both human and AI (middle)' },
-                { color: '#32494B', label: 'AI', desc: 'states only the AI policy visited (bottom)' },
+                { color: '#0072B2', label: 'AI', desc: 'states only the AI policy visited (bottom)' },
                 { color: '#6b7280', label: 'Prev Policy', desc: 'previous version\'s policy replayed on the new site (v2+)' },
               ] as const).map(({ color, label, desc }) => (
                 <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

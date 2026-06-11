@@ -7,8 +7,8 @@
  * otherwise the diagrams disagree about which steps belong to the same page.
  */
 
-export const AGENT_COLOR = '#32494B'
-export const HUMAN_COLOR = '#881342'
+export const AGENT_COLOR = '#0072B2'
+export const HUMAN_COLOR = '#E69F00'
 export const SANKEY_MARGIN = { top: 28, right: 200, bottom: 20, left: 20 }
 
 /** Normalise a URL to a path key, keeping the page_id query param (SPA pages). */

@@ -3,8 +3,8 @@ import type { ComparativeAnalysis, ActionPointItem, JourneyResponse, CompareHigh
 import * as api from '../../lib/api'
 import type { AgentStep } from '../agent/agentTypes'
 
-const AGENT_COLOR = '#32494B'
-const HUMAN_COLOR = '#881342'
+const AGENT_COLOR = '#0072B2'
+const HUMAN_COLOR = '#E69F00'
 
 interface HorizonActionPoint {
   id: string
