@@ -17,7 +17,7 @@ Dimensions (16 total):
 """
 
 import math
-from typing import Sequence
+from collections.abc import Sequence
 
 KNOWN_ACTIONS: list[str] = [
     "click",
@@ -81,7 +81,7 @@ def journey_embedding(steps: list[dict]) -> list[float]:
 
 def cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
     """Cosine similarity between two vectors (assumed L2-normalised → just dot product)."""
-    return round(sum(x * y for x, y in zip(a, b)), 4)
+    return round(sum(x * y for x, y in zip(a, b, strict=False)), 4)
 
 
 def similarity_matrix(

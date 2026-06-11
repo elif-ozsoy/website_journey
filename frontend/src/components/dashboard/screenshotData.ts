@@ -1,3 +1,5 @@
+import { debug } from '../../lib/debug'
+import { storageKeys } from '../../lib/storage'
 import type { ScreenshotData, HeatmapDot } from './ScreenshotCarousel'
 import type { AgentStep } from '../agent/agentTypes'
 import type { EventRow } from '../../lib/types'
@@ -76,8 +78,6 @@ function shortenPath(url: string): string {
 }
 
 // Agent viewport size (matches backend playwright config)
-const AGENT_VIEWPORT_W = 1280
-const AGENT_VIEWPORT_H = 800
 
 export function getScreenshotsFromAgentSteps(steps: AgentStep[]): ScreenshotData[] {
   const byPage = new Map<string, AgentStep[]>()
@@ -113,9 +113,9 @@ export function getScreenshotsFromAgentSteps(steps: AgentStep[]): ScreenshotData
         }
       })
 
-    // Build click heatmap dots from click_element steps
+    // Build click heatmap dots from click steps (browser-use stores as 'click', mapped events as 'click_element')
     const heatmapDots: HeatmapDot[] = pageSteps
-      .filter(s => s.action_type === 'click_element')
+      .filter(s => isAgentClick(s.action_type))
       .flatMap(s => {
         // element_coordinates are stored as percentages (0-100) — use directly
         if (s.element_coordinates) {
@@ -247,18 +247,23 @@ export function getStepsFromSessionEvents(events: EventRow[], siteUrl: string, s
       next_goal: '',
       screenshot_base64: '',
       screenshot_url: screenshotUrl,
+      // Normalise to 0-100% using the actual session viewport so downstream
+      // code can treat human element_coordinates the same as agent ones.
       element_coordinates:
         x !== null && y !== null && width !== null && height !== null
-          ? { x, y, width, height }
+          ? {
+              x: (x / vpW) * 100,
+              y: (y / vpH) * 100,
+              width: (width / vpW) * 100,
+              height: (height / vpH) * 100,
+            }
           : null,
       timestamp: e.timestamp,
     }
   })
 }
 
-function agentRunKey(siteId: string, versionId?: string): string {
-  return versionId ? `ciphercorgi_agent_run_${siteId}_${versionId}` : `ciphercorgi_agent_run_${siteId}`
-}
+const agentRunKey = storageKeys.agentRun
 
 export function loadAgentScreenshots(siteId: string, versionId?: string): ScreenshotData[] | null {
   try {
@@ -312,7 +317,7 @@ export function getScreenshotsFromSessionSteps(steps: AgentStep[], screenshotMet
       const pageLabel = screenshot.path ? (screenshot.path.split('/').filter(Boolean).pop() || screenshot.path) : `Page ${id}`
       
       // Find all steps that occurred on this page
-      let pageSteps: AgentStep[] = []
+      const pageSteps: AgentStep[] = []
       for (const [url, stepsForUrl] of stepsByPath.entries()) {
         const urlPathname = getPathname(url)
         // Match if pathnames are equal or if URL ends with the screenshot path
@@ -322,13 +327,13 @@ export function getScreenshotsFromSessionSteps(steps: AgentStep[], screenshotMet
       }
 
       // Build annotations from steps that have coordinates
+      // element_coordinates are already normalised to 0-100% by getStepsFromSessionEvents
       const annotations = pageSteps
         .filter(s => s.element_coordinates !== null)
         .map(s => {
           const ec = s.element_coordinates!
-          // Use centre of the element, clamped to [2, 98]% to avoid edge clipping
-          const x = Math.min(98, Math.max(2, ((ec.x + ec.width / 2) / HUMAN_VIEWPORT_W) * 100))
-          const y = Math.min(98, Math.max(2, ((ec.y + ec.height / 2) / HUMAN_VIEWPORT_H) * 100))
+          const x = Math.min(98, Math.max(2, ec.x + ec.width / 2))
+          const y = Math.min(98, Math.max(2, ec.y + ec.height / 2))
           const detail = s.action_details
           const detailStr = typeof detail === 'object' && detail !== null
             ? Object.values(detail).filter(v => typeof v === 'string').slice(0, 1).join('') || ''
@@ -343,6 +348,7 @@ export function getScreenshotsFromSessionSteps(steps: AgentStep[], screenshotMet
         })
 
       // Click heatmap dots for human session
+      // element_coordinates already in 0-100% — use same formula as agent dots
       const heatmapDots: HeatmapDot[] = pageSteps
         .filter(s => s.action_type === 'click_element')
         .flatMap(s => {
@@ -353,8 +359,8 @@ export function getScreenshotsFromSessionSteps(steps: AgentStep[], screenshotMet
           if (s.element_coordinates) {
             const ec = s.element_coordinates
             return [{
-              x: Math.min(98, Math.max(2, ((ec.x + ec.width / 2) / HUMAN_VIEWPORT_W) * 100)),
-              y: Math.min(98, Math.max(2, ((ec.y + ec.height / 2) / HUMAN_VIEWPORT_H) * 100)),
+              x: Math.min(98, Math.max(2, ec.x + ec.width / 2)),
+              y: Math.min(98, Math.max(2, ec.y + ec.height / 2)),
               kind: 'human' as const,
             }]
           }
@@ -373,6 +379,12 @@ export function getScreenshotsFromSessionSteps(steps: AgentStep[], screenshotMet
     })
 }
 
+// Matches all click-like action types from both agent (browser-use) and human sessions
+function isAgentClick(actionType: string): boolean {
+  return actionType === 'click_element' || actionType === 'click'
+    || actionType === 'select_dropdown' || actionType === 'select_option'
+}
+
 function normalizeUrl(url: string): string {
   try {
     const u = new URL(url)
@@ -381,9 +393,12 @@ function normalizeUrl(url: string): string {
   } catch { return url }
 }
 
+const CLICK_TRIGGERS = new Set(['click', 'click_element', 'select_dropdown', 'select_option'])
+
 export function getAggregatedScreenshots(
   agentJourneys: AgentStep[][],
   humanJourneys: AgentStep[][],
+  journeyScreenshots: import('../../lib/api').ScreenshotMeta[] = [],
 ): ScreenshotData[] {
   // bucket all steps by normalized URL, tracking source kind
   const byPage = new Map<string, { url: string; agentSteps: AgentStep[]; humanSteps: AgentStep[] }>()
@@ -402,13 +417,45 @@ export function getAggregatedScreenshots(
 
   let id = 1
   return Array.from(byPage.values()).map(({ url, agentSteps, humanSteps }) => {
-    // Best screenshot: last agent base64, then last agent screenshot_url, then first human screenshot_url
-    const lastAgentBase64 = [...agentSteps].reverse().find(s => s.screenshot_base64 && s.screenshot_base64.length > 0)
-    const lastAgentUrl = [...agentSteps].reverse().find(s => s.screenshot_url)
-    const firstHumanShot = humanSteps.find(s => s.screenshot_url)
-    const screenshotUrl = lastAgentBase64
-      ? `data:image/png;base64,${lastAgentBase64.screenshot_base64}`
-      : (lastAgentUrl?.screenshot_url ?? firstHumanShot?.screenshot_url)
+    // Best screenshot: use the full journey screenshots list (same source as ActionPointsList)
+    // to prefer a click-trigger image which captures the interactive page state
+    // (e.g. dropdown open, menu expanded) rather than a generic page-load screenshot.
+    let screenshotUrl: string | undefined
+    let screenshotUrls: string[] = []
+
+    if (journeyScreenshots.length > 0) {
+      // Include query string in path so WordPress-style sites (all at /?page_id=X) match correctly
+      const urlPath = (() => {
+        try {
+          const u = new URL(url)
+          return (u.pathname.replace(/\/$/, '') || '/') + u.search
+        } catch { return '/' }
+      })()
+      const pageShots = journeyScreenshots.filter(s => {
+        if (!s.ready || !s.path) return false
+        const sp = (s.path.startsWith('/') ? s.path : '/' + s.path)
+        return sp === urlPath
+      })
+      // Rank: click-triggers first (show interactive state), then by recency
+      const ranked = [
+        ...pageShots.filter(s => CLICK_TRIGGERS.has(s.trigger)).sort((a, b) => (b.created_at_ms ?? 0) - (a.created_at_ms ?? 0)),
+        ...pageShots.filter(s => !CLICK_TRIGGERS.has(s.trigger)).sort((a, b) => (b.created_at_ms ?? 0) - (a.created_at_ms ?? 0)),
+      ]
+      screenshotUrls = ranked.slice(0, 3).map(s => api.screenshotImageUrl(s.id))
+      if (screenshotUrls.length > 0) screenshotUrl = screenshotUrls[0]
+    }
+
+    if (!screenshotUrl) {
+      // Fallback: derive from step data (works for in-flight runs before screenshots are persisted)
+      const reversed = [...agentSteps].reverse()
+      const lastAgentBase64 = reversed.find(s => s.screenshot_base64 && s.screenshot_base64.length > 0)
+      const lastAgentClickUrl = reversed.find(s => isAgentClick(s.action_type) && s.screenshot_url)
+      const lastAgentUrl = lastAgentClickUrl ?? reversed.find(s => s.screenshot_url)
+      const firstHumanShot = humanSteps.find(s => s.screenshot_url)
+      screenshotUrl = lastAgentBase64
+        ? `data:image/png;base64,${lastAgentBase64.screenshot_base64}`
+        : (lastAgentUrl?.screenshot_url ?? firstHumanShot?.screenshot_url)
+    }
 
     // Build annotations from agent step element_coordinates (stored as 0-100% by backend)
     const seen = new Set<string>()
@@ -437,7 +484,7 @@ export function getAggregatedScreenshots(
     // Aggregate heatmap dots from all click events + VLM attention annotations
     const heatmapDots: HeatmapDot[] = [
       ...agentSteps
-        .filter(s => s.action_type === 'click_element')
+        .filter(s => isAgentClick(s.action_type))
         .flatMap(s => {
           // element_coordinates stored as percentages (0-100) — use directly
           if (s.element_coordinates) {
@@ -462,7 +509,8 @@ export function getAggregatedScreenshots(
           }
           if (s.element_coordinates) {
             const ec = s.element_coordinates
-            return [{ x: Math.min(98, Math.max(2, ((ec.x + ec.width / 2) / HUMAN_VIEWPORT_W) * 100)), y: Math.min(98, Math.max(2, ((ec.y + ec.height / 2) / HUMAN_VIEWPORT_H) * 100)), kind: 'human' as const }]
+            // element_coordinates are already normalised to 0-100% by getStepsFromSessionEvents
+            return [{ x: Math.min(98, Math.max(2, ec.x + ec.width / 2)), y: Math.min(98, Math.max(2, ec.y + ec.height / 2)), kind: 'human' as const }]
           }
           return []
         }),
@@ -473,6 +521,7 @@ export function getAggregatedScreenshots(
       pageLabel: shortenPath(url),
       pageUrl: url,
       screenshotUrl,
+      screenshotUrls: screenshotUrls.length > 0 ? screenshotUrls : (screenshotUrl ? [screenshotUrl] : []),
       annotations,
       heatmapDots,
       placeholderSections: screenshotUrl ? [] : DEFAULT_PLACEHOLDER_SECTIONS,
@@ -509,7 +558,7 @@ export function getTaskJourneysFromSessionEvents(
 ): HumanTaskJourney[] {
   const outcomeEvents = events.filter(e => e.type === 'task_outcome')
   const completeEvents = events.filter(e => e.type === 'task_complete')
-  console.log('[taskJourneys] events:', events.length,
+  debug('[taskJourneys] events:', events.length,
     '| task_outcome:', outcomeEvents.length,
     '| task_complete:', completeEvents.length)
 
@@ -517,17 +566,17 @@ export function getTaskJourneysFromSessionEvents(
   for (const e of outcomeEvents) {
     try {
       const d = e.data ? JSON.parse(e.data) : {}
-      console.log('[taskJourneys] outcome event data:', d)
+      debug('[taskJourneys] outcome event data:', d)
     } catch (err) {
-      console.log('[taskJourneys] outcome event UNPARSEABLE:', e.data, err)
+      debug('[taskJourneys] outcome event UNPARSEABLE:', e.data, err)
     }
   }
   for (const e of completeEvents) {
     try {
       const d = e.data ? JSON.parse(e.data) : {}
-      console.log('[taskJourneys] complete event data:', d)
+      debug('[taskJourneys] complete event data:', d)
     } catch (err) {
-      console.log('[taskJourneys] complete event UNPARSEABLE:', e.data, err)
+      debug('[taskJourneys] complete event UNPARSEABLE:', e.data, err)
     }
   }
 
@@ -537,9 +586,9 @@ export function getTaskJourneysFromSessionEvents(
   const outcomeByTaskTitle = new Map<string, 'success' | 'failed'>()
   for (const e of sortedAll) {
     if (e.type !== 'task_outcome') continue
-    let data: Record<string, unknown> = {}
-    try { data = e.data ? JSON.parse(e.data) : {} } catch { console.log('[taskJourneys] parse fail:', e.data); continue }
-    console.log('[taskJourneys] outcome loop:', { title: data.task_title, outcome: data.outcome, willSet: (data.outcome === 'success' || data.outcome === 'failed') })
+    let data: Record<string, unknown>
+    try { data = e.data ? JSON.parse(e.data) : {} } catch { debug('[taskJourneys] parse fail:', e.data); continue }
+    debug('[taskJourneys] outcome loop:', { title: data.task_title, outcome: data.outcome, willSet: (data.outcome === 'success' || data.outcome === 'failed') })
     const title = typeof data.task_title === 'string' ? data.task_title : null
     const outcome = data.outcome
     if (!title) continue
@@ -547,7 +596,7 @@ export function getTaskJourneysFromSessionEvents(
       outcomeByTaskTitle.set(title, outcome)
     }
   }
-  console.log('[taskJourneys] outcomeByTaskTitle map:', Array.from(outcomeByTaskTitle.entries()))
+  debug('[taskJourneys] outcomeByTaskTitle map:', Array.from(outcomeByTaskTitle.entries()))
  
   // task_complete boundaries with their metadata
   type Boundary = { timestamp: number; taskTitle: string; taskId: string | null; taskIndex: number }
@@ -597,7 +646,7 @@ export function getTaskJourneysFromSessionEvents(
     )
     const steps = getStepsFromSessionEvents(slice, siteUrl, screenshots, viewportW, viewportH)
     const outcome = outcomeByTaskTitle.get(b.taskTitle) ?? null
-    console.log('[taskJourneys] lookup:', { 
+    debug('[taskJourneys] lookup:', { 
       lookFor: b.taskTitle, 
       found: outcome, 
       mapKeys: Array.from(outcomeByTaskTitle.keys()),
@@ -623,7 +672,7 @@ export function getTaskJourneysFromSessionEvents(
  
 
   
-  console.log('[taskJourneys] FINAL:', journeys.map(j => ({
+  debug('[taskJourneys] FINAL:', journeys.map(j => ({
     title: j.taskTitle,
     outcome: j.outcome,
     steps: j.steps.length,

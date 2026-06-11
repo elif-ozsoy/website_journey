@@ -71,12 +71,41 @@ def _call_llm(
     steps: list[dict],
     is_agent: bool,
     focus_areas: list[str] | None,
+    api_key: str = "",
+    llm_provider: str = "",
 ) -> str:
     system_prompt = _build_system_prompt(is_agent, focus_areas)
     user_content = _format_steps(task_title, site_url, steps)
     messages = [{'role': 'user', 'content': user_content}]
 
-    if settings.anthropic_api_key:
+    # Per-request key takes priority over env vars
+    if api_key and llm_provider == "google":
+        from openai import OpenAI
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        )
+        resp = client.chat.completions.create(
+            model="gemini-2.0-flash",
+            max_tokens=1024,
+            response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": system_prompt}] + messages,
+        )
+        return resp.choices[0].message.content
+    elif api_key and llm_provider == "nvidia":
+        from openai import OpenAI
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://integrate.api.nvidia.com/v1",
+        )
+        resp = client.chat.completions.create(
+            model="meta/llama-3.3-70b-instruct",
+            max_tokens=1024,
+            response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": system_prompt}] + messages,
+        )
+        return resp.choices[0].message.content
+    elif settings.anthropic_api_key:
         import anthropic
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         msg = client.messages.create(
@@ -86,7 +115,7 @@ def _call_llm(
             messages=messages,
         )
         return msg.content[0].text
-    else:
+    elif settings.nvidia_api_key:
         from openai import OpenAI
         client = OpenAI(
             api_key=settings.nvidia_api_key,
@@ -94,6 +123,19 @@ def _call_llm(
         )
         resp = client.chat.completions.create(
             model="meta/llama-3.3-70b-instruct",
+            max_tokens=1024,
+            response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": system_prompt}] + messages,
+        )
+        return resp.choices[0].message.content
+    else:
+        from openai import OpenAI
+        client = OpenAI(
+            api_key=settings.google_api_key,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        )
+        resp = client.chat.completions.create(
+            model="gemini-2.0-flash",
             max_tokens=1024,
             response_format={"type": "json_object"},
             messages=[{"role": "system", "content": system_prompt}] + messages,
@@ -108,15 +150,18 @@ def analyze_journey_background(
     steps_json: str,
     is_agent: bool = True,
     focus_areas: list[str] | None = None,
+    api_key: str = "",
+    llm_provider: str = "",
 ) -> None:
     """Synchronous background task — called by FastAPI BackgroundTasks."""
-    if not settings.anthropic_api_key and not settings.nvidia_api_key:
+    has_key = api_key or settings.anthropic_api_key or settings.nvidia_api_key or settings.google_api_key
+    if not has_key:
         log.warning('No LLM API key configured — skipping journey analysis')
         return
 
     try:
         steps: list[dict] = json.loads(steps_json)
-        result_text = _call_llm(task_title, site_url, steps, is_agent, focus_areas)
+        result_text = _call_llm(task_title, site_url, steps, is_agent, focus_areas, api_key, llm_provider)
         json.loads(result_text)  # validate JSON
         analysis_json = result_text
     except Exception as exc:

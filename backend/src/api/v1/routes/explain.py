@@ -1,22 +1,18 @@
-import base64
-import os
+"""Text explanation endpoints: agent/human perspectives, synthesis, diagram links.
+
+Screenshot vision endpoints (annotate/select) live in annotate.py.
+All LLM calls go through services.llm_client.call_llm, which handles the
+Anthropic → Google fallback chain and raises 502 when every provider fails.
+"""
+
 from typing import Any
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
-from api.deps import get_db
+from services.llm_client import call_llm, resolve_keys
 
 router = APIRouter()
-
-
-def _resolve_api_key(request: Request) -> str:
-    key = request.headers.get("x-anthropic-key") or os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        raise HTTPException(status_code=503, detail="Anthropic API key not configured")
-    return key
 
 SYSTEM_PROMPT = (
     "You are a UX analyst. You will receive: "
@@ -80,38 +76,34 @@ def _build_prompt(body: ExplainRequest) -> str:
     return "\n".join(parts)
 
 
+def _ratings_lines(ratings: RatingsSummary | None) -> list[str]:
+    """Format a ratings summary as prompt lines; empty list when no ratings."""
+    if not ratings or ratings.count == 0:
+        return []
+    scores = []
+    if ratings.overall is not None:
+        scores.append(f"overall {ratings.overall:.1f}/5")
+    if ratings.navigation is not None:
+        scores.append(f"navigation {ratings.navigation:.1f}/5")
+    if ratings.design is not None:
+        scores.append(f"design {ratings.design:.1f}/5")
+    return [f"\nRatings (n={ratings.count}): {', '.join(scores)}"]
+
+
 @router.post("/explain-agent", response_model=ExplainResponse)
 async def explain_agent(body: ExplainRequest, request: Request) -> ExplainResponse:
-    api_key = _resolve_api_key(request)
+    anthropic_key, google_key = resolve_keys(request)
 
     if not body.steps:
         raise HTTPException(status_code=400, detail="steps must not be empty")
-
-    prompt = _build_prompt(body)
 
     payload = {
         "model": "claude-sonnet-4-6",
         "max_tokens": 1500,
         "system": SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": _build_prompt(body)}],
     }
-
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            json=payload,
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-        )
-
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Anthropic API error: {resp.text[:300]}")
-
-    data = resp.json()
-    text = data["content"][0]["text"]
+    text = await call_llm(payload, anthropic_key, google_key, timeout=60.0)
     return ExplainResponse(explanation=text)
 
 
@@ -140,7 +132,7 @@ _EXPLAIN_AGENT_SYSTEM = (
 
 @router.post("/explain-agent-perspective", response_model=ExplainAgentPerspectiveResponse)
 async def explain_agent_perspective(body: ExplainAgentPerspectiveRequest, request: Request) -> ExplainAgentPerspectiveResponse:
-    api_key = _resolve_api_key(request)
+    anthropic_key, google_key = resolve_keys(request)
 
     if not body.agent_thoughts:
         raise HTTPException(status_code=400, detail="No agent thoughts provided")
@@ -149,30 +141,15 @@ async def explain_agent_perspective(body: ExplainAgentPerspectiveRequest, reques
     for t in body.agent_thoughts[:6]:
         parts.append(f"  - {t[:300]}")
     parts.append("\nWrite exactly two short paragraphs explaining what this agent behaviour reveals about the action point.")
-    prompt = "\n".join(parts)
 
     payload = {
         "model": "claude-haiku-4-5-20251001",
         "max_tokens": 150,
         "system": _EXPLAIN_AGENT_SYSTEM,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": "\n".join(parts)}],
     }
-
-    async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            json=payload,
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-        )
-
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Anthropic API error: {resp.text[:200]}")
-
-    return ExplainAgentPerspectiveResponse(explanation=resp.json()["content"][0]["text"].strip())
+    text = await call_llm(payload, anthropic_key, google_key, timeout=20.0)
+    return ExplainAgentPerspectiveResponse(explanation=text.strip())
 
 
 # ─── Human-perspective explanation endpoint ──────────────────────────────────
@@ -202,7 +179,10 @@ _EXPLAIN_HUMAN_SYSTEM = (
 
 @router.post("/explain-human", response_model=ExplainHumanResponse)
 async def explain_human(body: ExplainHumanRequest, request: Request) -> ExplainHumanResponse:
-    api_key = _resolve_api_key(request)
+    anthropic_key, google_key = resolve_keys(request)
+
+    if not body.human_narratives and not body.human_comments:
+        raise HTTPException(status_code=400, detail="No human data provided")
 
     parts = [f"Action point: {body.action_point}", f"Task: {body.task_title}\n"]
 
@@ -211,50 +191,23 @@ async def explain_human(body: ExplainHumanRequest, request: Request) -> ExplainH
         for n in body.human_narratives[:5]:
             parts.append(f"  - {n}")
 
-    if body.ratings and body.ratings.count > 0:
-        r = body.ratings
-        scores = []
-        if r.overall is not None:
-            scores.append(f"overall {r.overall:.1f}/5")
-        if r.navigation is not None:
-            scores.append(f"navigation {r.navigation:.1f}/5")
-        if r.design is not None:
-            scores.append(f"design {r.design:.1f}/5")
-        parts.append(f"\nRatings (n={r.count}): {', '.join(scores)}")
+    parts.extend(_ratings_lines(body.ratings))
 
     if body.human_comments:
         parts.append("Tester comments:")
         for c in body.human_comments[:5]:
             parts.append(f'  "{c}"')
 
-    if not body.human_narratives and not body.human_comments:
-        raise HTTPException(status_code=400, detail="No human data provided")
-
     parts.append("\nWrite exactly two short paragraphs explaining what this human evidence reveals about the action point.")
-    prompt = "\n".join(parts)
 
     payload = {
         "model": "claude-haiku-4-5-20251001",
         "max_tokens": 150,
         "system": _EXPLAIN_HUMAN_SYSTEM,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": "\n".join(parts)}],
     }
-
-    async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            json=payload,
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-        )
-
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Anthropic API error: {resp.text[:200]}")
-
-    return ExplainHumanResponse(explanation=resp.json()["content"][0]["text"].strip())
+    text = await call_llm(payload, anthropic_key, google_key, timeout=20.0)
+    return ExplainHumanResponse(explanation=text.strip())
 
 
 # ─── Perspectives synthesis endpoint ─────────────────────────────────────────
@@ -280,7 +233,7 @@ _SYNTH_SYSTEM = (
 
 @router.post("/synthesize-perspectives", response_model=SynthesizeResponse)
 async def synthesize_perspectives(body: SynthesizeRequest, request: Request) -> SynthesizeResponse:
-    api_key = _resolve_api_key(request)
+    anthropic_key, google_key = resolve_keys(request)
 
     parts = [f"Action point: {body.action_point}\n"]
 
@@ -291,16 +244,9 @@ async def synthesize_perspectives(body: SynthesizeRequest, request: Request) -> 
     else:
         parts.append("Agent thoughts: (none relevant)")
 
-    if body.ratings and body.ratings.count > 0:
-        r = body.ratings
-        rating_parts = []
-        if r.overall is not None:
-            rating_parts.append(f"overall {r.overall:.1f}/5")
-        if r.navigation is not None:
-            rating_parts.append(f"navigation {r.navigation:.1f}/5")
-        if r.design is not None:
-            rating_parts.append(f"design {r.design:.1f}/5")
-        parts.append(f"\nHuman ratings (n={r.count}): {', '.join(rating_parts)}")
+    rating_lines = _ratings_lines(body.ratings)
+    if rating_lines:
+        parts.extend(rating_lines)
         if body.human_comments:
             parts.append("Human comments:")
             for c in body.human_comments[:5]:
@@ -313,30 +259,15 @@ async def synthesize_perspectives(body: SynthesizeRequest, request: Request) -> 
         parts.append("\nHuman feedback: (none)")
 
     parts.append("\nSynthesize in 2–3 sentences.")
-    prompt = "\n".join(parts)
 
     payload = {
         "model": "claude-haiku-4-5-20251001",
         "max_tokens": 150,
         "system": _SYNTH_SYSTEM,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": "\n".join(parts)}],
     }
-
-    async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            json=payload,
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-        )
-
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Anthropic API error: {resp.text[:200]}")
-
-    return SynthesizeResponse(summary=resp.json()["content"][0]["text"].strip())
+    text = await call_llm(payload, anthropic_key, google_key, timeout=20.0)
+    return SynthesizeResponse(summary=text.strip())
 
 
 # ─── Diagram-link explanation endpoint ───────────────────────────────────────
@@ -372,7 +303,7 @@ def _diagram_context(diagram_type: str) -> str:
 
 @router.post("/explain-diagram-link", response_model=DiagramLinkResponse)
 async def explain_diagram_link(body: DiagramLinkRequest, request: Request) -> DiagramLinkResponse:
-    api_key = _resolve_api_key(request)
+    anthropic_key, google_key = resolve_keys(request)
 
     stat_lines = "\n".join(f"  {k}: {v}" for k, v in body.stats.items() if v is not None)
     prompt = (
@@ -388,135 +319,5 @@ async def explain_diagram_link(body: DiagramLinkRequest, request: Request) -> Di
         "system": _DIAGRAM_LINK_SYSTEM,
         "messages": [{"role": "user", "content": prompt}],
     }
-
-    async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            json=payload,
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-        )
-
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Anthropic API error: {resp.text[:200]}")
-
-    return DiagramLinkResponse(explanation=resp.json()["content"][0]["text"].strip().rstrip("."))
-
-
-# ─── Screenshot annotation endpoint ──────────────────────────────────────────
-
-class AnnotateRequest(BaseModel):
-    screenshot_id: int
-    issue_text: str
-
-
-class AnnotateResponse(BaseModel):
-    x: float        # 0–1 normalised
-    y: float        # 0–1 normalised
-    width: float    # 0–1 normalised
-    height: float   # 0–1 normalised
-    found: bool
-
-
-_ANNOTATE_SYSTEM = (
-    "You are a UI element locator. Given a screenshot and a description of a UX issue, "
-    "identify where on the screen the problematic UI element or area is located. "
-    "Respond ONLY with a JSON object: "
-    '{"x": <0-1>, "y": <0-1>, "width": <0-1>, "height": <0-1>, "found": true} '
-    "where x,y are the top-left corner and width/height are the bounding box, "
-    "all as fractions of the total image dimensions (0 to 1). "
-    'If you cannot identify a specific element, respond with {"found": false}.'
-)
-
-
-@router.post("/annotate-screenshot", response_model=AnnotateResponse)
-async def annotate_screenshot(
-    body: AnnotateRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-) -> AnnotateResponse:
-    api_key = _resolve_api_key(request)
-
-    from models.screenshot import Screenshot
-    sc = db.get(Screenshot, body.screenshot_id)
-    if not sc or not sc.file_path or not os.path.exists(sc.file_path):
-        raise HTTPException(status_code=404, detail="Screenshot not found")
-
-    with open(sc.file_path, "rb") as f:
-        img_b64 = base64.b64encode(f.read()).decode()
-
-    ext = sc.file_path.rsplit(".", 1)[-1].lower()
-    media_type = "image/png" if ext == "png" else "image/jpeg"
-
-    payload = {
-        "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 128,
-        "system": _ANNOTATE_SYSTEM,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_b64}},
-                {"type": "text", "text": f"UX issue: {body.issue_text}"},
-            ],
-        }],
-    }
-
-    import asyncio
-    import ssl
-
-    _RETRYABLE = (
-        httpx.ReadError,
-        httpx.ConnectError,
-        httpx.ConnectTimeout,
-        httpx.ReadTimeout,
-        httpx.RemoteProtocolError,
-        ssl.SSLError,
-    )
-
-    last_exc: Exception | None = None
-    resp = None
-    for attempt in range(4):
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=15.0)) as client:
-                resp = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    json=payload,
-                    headers={
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    },
-                )
-            if resp.status_code == 200:
-                break
-            if resp.status_code >= 500:
-                await asyncio.sleep(1.0 * (attempt + 1))
-                continue
-            break  # 4xx — don't retry
-        except _RETRYABLE as exc:
-            last_exc = exc
-            await asyncio.sleep(1.0 * (attempt + 1))
-
-    if resp is None:
-        raise HTTPException(status_code=502, detail=f"Anthropic API unreachable: {last_exc}")
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Anthropic API error: {resp.text[:300]}")
-
-    import json
-    raw = resp.json()["content"][0]["text"].strip()
-    try:
-        data = json.loads(raw)
-        if not data.get("found", False):
-            return AnnotateResponse(x=0, y=0, width=0, height=0, found=False)
-        return AnnotateResponse(
-            x=float(data.get("x", 0)),
-            y=float(data.get("y", 0)),
-            width=float(data.get("width", 0.2)),
-            height=float(data.get("height", 0.1)),
-            found=True,
-        )
-    except Exception:
-        return AnnotateResponse(x=0, y=0, width=0, height=0, found=False)
+    text = await call_llm(payload, anthropic_key, google_key, timeout=20.0)
+    return DiagramLinkResponse(explanation=text.strip().rstrip("."))

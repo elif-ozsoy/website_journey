@@ -243,22 +243,29 @@ def rewrite_html(html: str, origin: str, proxy_base: str) -> str:
     # 1. Remove <base> tags
     html = re.sub(r"<base\s[^>]*>", "", html, flags=re.IGNORECASE)
 
-    # 2. Inject interceptor at top of <head>
+    # 2. Inject interceptor at top of <head>.
+    # The base tag must come first so its "frozen base URL" is computed before the
+    # interceptor's synchronous history.replaceState IIFE fires.  Without it, bare
+    # relative paths (e.g. href="style.css") would resolve against "/" after the
+    # replaceState, returning 404s from the CipherCorgi backend instead of being
+    # fetched through the proxy.  Root-relative paths already rewritten to
+    # /site/{slug}/... are unaffected because root-relative URLs ignore <base>.
     interceptor = _build_interceptor(proxy_base, origin)
+    base_tag = f'<base href="{proxy_base}/">'
     if re.search(r"<head[\s>]", html, re.IGNORECASE):
         html = re.sub(
             r"(<head(?:\s[^>]*)?>)",
-            lambda m: m.group(1) + interceptor,
+            lambda m: m.group(1) + base_tag + interceptor,
             html, count=1, flags=re.IGNORECASE,
         )
     elif re.search(r"<html[\s>]", html, re.IGNORECASE):
         html = re.sub(
             r"(<html(?:\s[^>]*)?>)",
-            lambda m: m.group(1) + "<head>" + interceptor + "</head>",
+            lambda m: m.group(1) + "<head>" + base_tag + interceptor + "</head>",
             html, count=1, flags=re.IGNORECASE,
         )
     else:
-        html = interceptor + html
+        html = base_tag + interceptor + html
 
     # 3. Rewrite absolute URLs for each host variant
     _ATTRS = r"href|src|action|poster|data-src|data-href|data-url|data-lazy-src|data-original|data-bg|data-background|data-lazy|content"

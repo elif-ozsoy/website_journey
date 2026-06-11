@@ -171,7 +171,7 @@ export default function HowItWorksDiagram() {
           <text className="badge-text" x="130" y="270" textAnchor="middle" dominantBaseline="central">2</text>
           <foreignObject x="155" y="220" width="265" height="100">
             <div className="step-content">
-              <span><strong className="title-orange">Execute:</strong> Gather real-world data from your human testers.</span>
+              <span> Gather real-world data from your <strong className="title-orange">human</strong> testers.</span>
             </div>
           </foreignObject>
         </g>

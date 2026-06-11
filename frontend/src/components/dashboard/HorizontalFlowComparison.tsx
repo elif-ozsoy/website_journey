@@ -163,8 +163,8 @@ function FlowLane({
 
   const colorVars =
     color === 'blue'
-      ? { bg: 'var(--brand-pale)', label: 'var(--brand)', border: 'var(--accent)' }
-      : { bg: '#ecfdf5', label: '#0d9488', border: '#10b981' }
+      ? { bg: 'var(--agent-pale)', label: 'var(--agent-color)', border: 'var(--agent-color)' }
+      : { bg: 'var(--human-pale)', label: 'var(--human-color)', border: 'var(--human-color)' }
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>

@@ -1,0 +1,339 @@
+import { useState, useEffect, useMemo } from 'react'
+import type { ComparativeAnalysis, ActionPointItem, JourneyResponse, CompareHighlight } from '../../lib/api'
+import * as api from '../../lib/api'
+import type { AgentStep } from '../agent/agentTypes'
+import type { NodeDivergence } from './SankeyDiagram'
+
+
+interface SankeyActionPoint {
+  id: string
+  text: string
+  type?: 'ux_issue' | 'agent_gap' | 'human_issue'
+  reason: string
+  taskTitle: string
+  severity: 'high' | 'medium'
+}
+
+function Spinner({ size = 10 }: { size?: number }) {
+  return (
+    <span style={{
+      width: size, height: size, borderRadius: '50%', display: 'inline-block', flexShrink: 0,
+      border: `${Math.max(1.5, size / 6)}px solid var(--gray200)`,
+      borderTopColor: 'var(--brand)',
+      animation: 'spin 0.7s linear infinite',
+    }} />
+  )
+}
+
+
+function TabBtn({ label, active, badge, onClick }: {
+  label: string; active: boolean; badge?: number; onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        flex: 1, padding: '9px 8px', border: 'none', cursor: 'pointer',
+        background: 'transparent', fontFamily: 'var(--font-sans)',
+        fontSize: 'var(--fs-small)', fontWeight: active ? 700 : 500,
+        color: active ? 'var(--brand)' : 'var(--gray400)',
+        borderBottom: active ? '2px solid var(--brand)' : '2px solid transparent',
+        transition: 'color 0.13s, border-color 0.13s',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+      }}
+    >
+      {label}
+      {badge != null && badge > 0 && (
+        <span style={{
+          fontSize: '10px', fontWeight: 700, padding: '0 5px', borderRadius: 99,
+          background: active ? 'var(--brand)' : 'var(--gray200)',
+          color: active ? '#fff' : 'var(--gray500)',
+          lineHeight: '16px', minWidth: 16, textAlign: 'center',
+        }}>{badge}</span>
+      )}
+    </button>
+  )
+}
+
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--gray400)', marginBottom: 6 }}>
+      {children}
+    </div>
+  )
+}
+
+function truncate(s: string, max: number) {
+  return s.length > max ? s.slice(0, max - 1) + '…' : s
+}
+
+export default function SankeyInsightsPanel({
+  compareAnalysis,
+  compareLoading,
+  agentJourneys,
+  humanJourneySteps,
+  divergences = [],
+  actionContext,
+}: {
+  compareAnalysis: ComparativeAnalysis | null
+  compareLoading: boolean
+  agentJourneys: JourneyResponse[]
+  humanJourneySteps: AgentStep[][]
+  divergences?: NodeDivergence[]
+  actionContext?: { note?: string; explanation?: string; highlight?: CompareHighlight } | null
+  onClearActionContext?: () => void
+}) {
+  const [activeTab, setActiveTab] = useState<'guide' | 'insights'>('insights')
+
+  useEffect(() => {
+    if (actionContext) setActiveTab('insights')
+  }, [actionContext])
+
+  // ── Action points linked to the Sankey diagram ───────────────────
+  const sankeyPoints = useMemo<SankeyActionPoint[]>(() => {
+    if (!compareAnalysis) return []
+    const pts: SankeyActionPoint[] = []
+    for (const task of compareAnalysis.task_analyses) {
+      if (task.difficulty === 'low') continue
+      const severity: 'high' | 'medium' = task.difficulty === 'high' ? 'high' : 'medium'
+      for (const raw of [...task.pain_points, ...task.recommendations]) {
+        const item = raw as ActionPointItem
+        const ref = item.diagrams?.find(d => d.view === 'sankey')
+        if (!ref) continue
+        pts.push({
+          id: `${task.task_title}::${item.text.slice(0, 40)}`,
+          text: item.text,
+          type: item.type,
+          reason: ref.reason,
+          taskTitle: task.task_title,
+          severity,
+        })
+      }
+    }
+    return pts
+  }, [compareAnalysis])
+
+  // ── Stats for LLM diagram-link explanations ────────────────────
+  const stats = useMemo(() => {
+    const agentStepCounts = agentJourneys.map(j => j.total_steps).filter(n => n > 0)
+    const humanStepCounts = humanJourneySteps.map(s => s.length).filter(n => n > 0)
+    const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null
+    const divergentMilestones = divergences.map(d =>
+      `${d.nodeName} (${d.groups.map(g => `"${truncate(g.label, 30)}"`).join(' vs ')})`
+    )
+    return {
+      agent_avg_steps: avg(agentStepCounts),
+      human_avg_steps: avg(humanStepCounts),
+      agent_journey_count: agentJourneys.length,
+      human_journey_count: humanJourneySteps.length,
+      divergence_count: divergences.length,
+      divergent_milestones: divergentMilestones.slice(0, 4).join('; ') || null,
+    }
+  }, [agentJourneys, humanJourneySteps, divergences])
+
+  const [explanations, setExplanations] = useState<Record<string, string>>({})
+  const [expLoading, setExpLoading] = useState<Record<string, boolean>>({})
+
+  const [divergenceOpen, setDivergenceOpen] = useState(false)
+
+
+  const pointIds = sankeyPoints.map(p => p.id).join(',')
+  useEffect(() => {
+    if (sankeyPoints.length === 0) return
+    for (const pt of sankeyPoints) {
+      setExpLoading(prev => ({ ...prev, [pt.id]: true }))
+      api.explainDiagramLink(pt.text, 'sankey', stats as Record<string, unknown>)
+        .then(r => setExplanations(prev => ({ ...prev, [pt.id]: r.explanation })))
+        .catch(() => {})
+        .finally(() => setExpLoading(prev => ({ ...prev, [pt.id]: false })))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pointIds])
+
+  const hasDivergence = divergences.length > 0
+  const insightCount = sankeyPoints.length + (hasDivergence ? 1 : 0)
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+      {/* ── Tab bar ── */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0, background: 'var(--surface)' }}>
+        <TabBtn label="Guide" active={activeTab === 'guide'} onClick={() => setActiveTab('guide')} />
+        <TabBtn label="Action Points" active={activeTab === 'insights'} badge={insightCount} onClick={() => setActiveTab('insights')} />
+      </div>
+
+      {/* ──────────────── GUIDE TAB ──────────────── */}
+      {activeTab === 'guide' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          <div>
+            <SectionLabel>What is a Sankey diagram?</SectionLabel>
+            <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.7 }}>
+              A Sankey diagram shows how AI agents and humans moved through the website's milestone stages. Each <strong>rectangle is a milestone</strong> (e.g. navigation click, page view, form input); the curved ribbons between them show how journeys progressed from one stage to the next.
+            </p>
+          </div>
+
+          <div>
+            <SectionLabel>Reading ribbon widths</SectionLabel>
+            <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.7 }}>
+              Ribbon width reflects <strong>how many navigation steps</strong> were recorded between two milestones — not the number of distinct journeys. A single session that spent many steps transitioning between two stages will produce a wide ribbon.
+            </p>
+          </div>
+
+
+          <div>
+            <SectionLabel>Path divergence</SectionLabel>
+            <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.7 }}>
+              When multiple journeys reach the same milestone but then interact with <strong>different elements</strong> to continue, that node is marked with a{' '}
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 14, height: 14, borderRadius: '50%', background: '#3b82f6',
+                color: '#fff', fontSize: '0.6rem', fontWeight: 900, verticalAlign: 'middle',
+              }}>!</span>{' '}
+              blue badge. This is a <em>divergence</em>, not just one journey splitting in two, but potentially many journeys each taking a distinct path through that milestone. The panel to the right lists every divergent milestone and which element each journey clicked.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────── ACTION POINTS TAB ──────────────── */}
+      {activeTab === 'insights' && (
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+
+          {/* ── Action point context card (from "Verify in diagrams" link) ── */}
+          {actionContext && (
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {actionContext.note && (
+                <div style={{ background: 'var(--surface)', border: '1.5px solid var(--brand)', borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--brand)', marginBottom: 6 }}>Action Point</div>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>{actionContext.note}</p>
+                </div>
+              )}
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-primary)', marginBottom: 6 }}>How this diagram connects</div>
+                <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                  {actionContext.explanation ?? 'The highlighted journeys in the flow diagram show the evidence for this action point.'}
+                </p>
+              </div>
+              {actionContext.highlight?.side && actionContext.highlight.side !== 'both' && (
+                <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray500)' }}>
+                  Focus: <strong>{actionContext.highlight.side === 'ai' ? 'AI agent' : 'Human'}</strong> journeys are highlighted in the diagram.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Loading */}
+          {compareLoading && (
+            <div style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--gray400)', fontSize: 'var(--fs-small)' }}>
+              <Spinner size={12} /> Generating analysis…
+            </div>
+          )}
+
+          
+
+          {/* ── Divergence card ── */}
+          {hasDivergence && (
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button
+                onClick={() => setDivergenceOpen(o => !o)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                  background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                  fontFamily: 'inherit', textAlign: 'left',
+                }}
+              >
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 16, height: 16, borderRadius: '50%', background: '#3b82f6',
+                  color: '#fff', fontSize: '0.6rem', fontWeight: 900, flexShrink: 0,
+                }}>!</span>
+                <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: 99, background: '#dbeafe', color: '#1d4ed8' }}>
+                  {divergences.length} DIVERGENCE{divergences.length !== 1 ? 'S' : ''} DETECTED
+                </span>
+                <span style={{
+                  marginLeft: 'auto', fontSize: '0.7rem', color: 'var(--gray400)',
+                  transform: divergenceOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.15s', flexShrink: 0,
+                }}>▶</span>
+              </button>
+
+              {divergenceOpen && (
+                <>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray600)', lineHeight: 1.5 }}>
+                    At {divergences.length} milestone{divergences.length !== 1 ? 's' : ''}, different journeys interacted with different elements. Look for the <strong>!</strong> badge on nodes in the diagram.
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {divergences.map(d => (
+                      <div key={d.nodeId} style={{
+                        paddingLeft: 10, borderLeft: '2px solid #93c5fd',
+                        display: 'flex', flexDirection: 'column', gap: 3,
+                      }}>
+                        <div style={{ fontSize: 'var(--fs-small)', fontWeight: 700, color: '#1e40af' }}>
+                          {d.nodeName} · {d.groups.length} paths
+                        </div>
+                        {d.groups.map((g, gi) => (
+                          <div key={gi} style={{ fontSize: 'var(--fs-small)', color: 'var(--gray600)', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                            <span style={{ color: '#2563eb', fontWeight: 700, flexShrink: 0 }}>•</span>
+                            <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>"{truncate(g.label, 44)}"</span>
+                            <span style={{ color: 'var(--gray400)', flexShrink: 0 }}>({g.visits.length})</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── Empty state ── */}
+          {!compareLoading && sankeyPoints.length === 0 && (
+            <div style={{ padding: '14px 16px', fontSize: 'var(--fs-small)', color: 'var(--gray400)', lineHeight: 1.6 }}>
+              {compareAnalysis
+                ? 'No action points are directly linked to this flow diagram.'
+                : 'Run the comparative analysis from the Overview tab to see action points here.'}
+            </div>
+          )}
+
+          {/* ── Action point cards ── */}
+          <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {sankeyPoints.map((pt, i) => {
+            const explanation = explanations[pt.id]
+            const isLoading = expLoading[pt.id]
+            return (
+              <div key={pt.id} style={{ borderRadius: 8, border: '1px solid var(--border)', background: 'var(--white)', overflow: 'hidden', flexShrink: 0 }}>
+                <div style={{ padding: '7px 12px', background: 'var(--gray50)', borderBottom: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
+                    {pt.taskTitle}
+                  </span>
+                </div>
+                <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                    {i + 1}. {pt.text}
+                  </p>
+                  {pt.reason && (
+                    <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--gray500)', lineHeight: 1.5 }}>{pt.reason}</p>
+                  )}
+                  {isLoading ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-small)', color: 'var(--gray400)' }}>
+                      <Spinner size={9} /> Analysing…
+                    </div>
+                  ) : explanation ? (
+                    <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--brand)', lineHeight: 1.5, borderLeft: '2px solid var(--brand)', paddingLeft: 7 }}>
+                      {explanation}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            )
+          })}
+          </div>
+
+          <div style={{ flex: 1 }} />
+        </div>
+      )}
+    </div>
+  )
+}

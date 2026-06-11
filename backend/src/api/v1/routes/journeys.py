@@ -1,5 +1,4 @@
 import json
-from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -11,7 +10,7 @@ from models.journey import Journey
 from models.user import User
 from schemas.journeys import JourneyResponse, JourneySaveRequest, ProjectWithJourneys
 from services.analysis import analyze_journey_background
-from services.embeddings import cosine_similarity, similarity_matrix
+from services.embeddings import cosine_similarity
 
 router = APIRouter(tags=["Journeys"])
 
@@ -39,7 +38,7 @@ def _journey_to_response(j: Journey, strip_screenshots: bool = False, db: Sessio
             rows = db.query(Screenshot).filter(Screenshot.session_id == session_id).all()
             screenshot_urls = {
                 r.action_id: f"/api/v1/screenshots/{r.id}/image"
-                for r in rows if r.action_id and r.file_path
+                for r in rows if r.action_id and (r.data is not None or r.file_path is not None)
             }
         steps = _strip_screenshots(steps, screenshot_urls)
     return JourneyResponse(
@@ -55,6 +54,7 @@ def _journey_to_response(j: Journey, strip_screenshots: bool = False, db: Sessio
         source=j.source,
         is_agent=j.is_agent,
         embedding=json.loads(j.embedding) if j.embedding else None,
+        solution_eval=json.loads(j.solution_eval) if getattr(j, 'solution_eval', None) else None,
         completed_at=j.completed_at,
         updated_at=j.updated_at,
     )
@@ -63,6 +63,7 @@ def _journey_to_response(j: Journey, strip_screenshots: bool = False, db: Sessio
 @router.post("/journeys", response_model=JourneyResponse, status_code=201)
 def save_journey(
     body: JourneySaveRequest,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
@@ -78,10 +79,11 @@ def save_journey(
         task_id=body.task_id,
     )
     # Fire-and-forget LLM analysis
-    site = db.get(type(journey).__table__.c, journey.site_id) if False else None  # lazy
     from models.site import Site  # avoid circular at module level
     site_obj = db.get(Site, journey.site_id)
     site_url = site_obj.target_url if site_obj else ""
+    agent_api_key = request.headers.get("x-agent-api-key", "")
+    agent_provider = request.headers.get("x-agent-provider", "")
     background_tasks.add_task(
         analyze_journey_background,
         journey.id,
@@ -90,6 +92,8 @@ def save_journey(
         journey.steps,
         body.is_agent,
         body.focus_areas,
+        agent_api_key,
+        agent_provider,
     )
     return _journey_to_response(journey)
 
@@ -108,6 +112,7 @@ def get_journey(
 @router.post("/journeys/{journey_id}/analyze", response_model=dict)
 def trigger_analysis(
     journey_id: int,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
@@ -117,12 +122,18 @@ def trigger_analysis(
     from models.site import Site
     site_obj = db.get(Site, journey.site_id)
     site_url = site_obj.target_url if site_obj else ""
+    agent_api_key = request.headers.get("x-agent-api-key", "")
+    agent_provider = request.headers.get("x-agent-provider", "")
     background_tasks.add_task(
         analyze_journey_background,
         journey.id,
         journey.task_title,
         site_url,
         journey.steps,
+        True,
+        None,
+        agent_api_key,
+        agent_provider,
     )
     return {"status": "queued"}
 
@@ -131,9 +142,11 @@ def trigger_analysis(
 def list_site_journeys(
     site_id: str,
     source: str | None = None,
+    task_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    journeys = svc.get_journeys_for_site(db, site_id, source=source)
+    print(f"Listing journeys for site_id={site_id}, source={source}, task_id={task_id}")
+    journeys = svc.get_journeys_for_site(db, site_id, source=source, task_id=task_id)
     return [_journey_to_response(j, strip_screenshots=True, db=db) for j in journeys]
 
 
@@ -160,7 +173,7 @@ class JourneySimilarityItem(BaseModel):
 @router.get("/sites/{site_id}/similarity", response_model=list[JourneySimilarityItem])
 def get_site_similarity(
     site_id: str,
-    task_id: Optional[int] = Query(None),
+    task_id: int | None = Query(None),
     db: Session = Depends(get_db),
 ):
     """
@@ -195,8 +208,8 @@ def get_site_similarity(
 # ─── Comparative analysis endpoint ───────────────────────────────────────────
 
 class ComparativeAnalysisRequest(BaseModel):
-    task_ids: Optional[List[int]] = None  # None = all tasks
-    version_id: Optional[str] = "v1"
+    task_ids: list[int] | None = None  # None = all tasks
+    version_id: str | None = "v1"
 
 
 @router.get("/sites/{site_id}/comparative-analysis")
@@ -218,11 +231,12 @@ def get_comparative_analysis(
     return json.loads(record.analysis_json)
 
 
-@router.post("/sites/{site_id}/comparative-analysis")
+@router.post("/sites/{site_id}/comparative-analysis", status_code=202)
 def comparative_analysis(
     site_id: str,
     body: ComparativeAnalysisRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """
@@ -259,12 +273,14 @@ def comparative_analysis(
     ]
 
     # ── Human journeys from TrackerSession + Event tables ─────────────────────
-    # Only include human Journey rows that haven't already been added above
-    human_journey_ids = {j.id for j in db_journeys if j.is_agent is False}
-
-    # Build a fallback task title from site tasks (first task title, or generic)
+    # Human tracker sessions are not tied to a specific task (the tracking
+    # script doesn't capture which task the visitor was doing), so attribute
+    # each human session to EVERY task being analysed. This mirrors the
+    # dashboard graphs, which show human journeys against all tasks, and avoids
+    # the LLM reporting "no human data" / "N/A" for tasks other than the first.
     site_tasks = db.query(TaskModel).filter(TaskModel.site_id == site_id).all()
-    default_task_title = site_tasks[0].title if site_tasks else "General navigation"
+    agent_task_titles = [t for t in {j.task_title for j in db_journeys if j.is_agent is not False} if t]
+    human_task_titles: list[str] = agent_task_titles or [t.title for t in site_tasks] or ["General navigation"]
 
     sessions = (
         db.query(TrackerSession)
@@ -286,10 +302,14 @@ def comparative_analysis(
 
         def _map_action(t: str) -> str:
             t = t.lower()
-            if "click" in t: return "click_element"
-            if any(k in t for k in ("input", "change", "submit", "key")): return "input_text"
-            if "scroll" in t: return "scroll"
-            if any(k in t for k in ("navigate", "route", "page")): return "go_to_url"
+            if "click" in t:
+                return "click_element"
+            if any(k in t for k in ("input", "change", "submit", "key")):
+                return "input_text"
+            if "scroll" in t:
+                return "scroll"
+            if any(k in t for k in ("navigate", "route", "page")):
+                return "go_to_url"
             return "unknown"
 
         steps = []
@@ -307,44 +327,52 @@ def comparative_analysis(
                 "timestamp": e.timestamp,
             })
 
-        journey_dicts.append({
-            "task_title": default_task_title,
-            "is_agent": False,
-            "steps": steps,
-        })
+        # Attribute this human session to every analysed task.
+        for title in human_task_titles:
+            journey_dicts.append({
+                "task_title": title,
+                "is_agent": False,
+                "steps": steps,
+            })
 
     if not journey_dicts:
         raise HTTPException(status_code=404, detail="No journeys found for this site")
 
-    try:
-        anthropic_key = request.headers.get("x-anthropic-key") or None
-        agent_api_key = request.headers.get("x-agent-api-key") or None
-        agent_provider = request.headers.get("x-agent-provider") or None
-        result = run_comparative_analysis(
-            site_obj.target_url,
-            journey_dicts,
-            api_key=anthropic_key,
-            agent_api_key=agent_api_key,
-            agent_provider=agent_provider,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    # ── Persist result so it isn't recomputed on every page visit ────────────
+    anthropic_key = request.headers.get("x-anthropic-key") or None
+    agent_api_key = request.headers.get("x-agent-api-key") or None
+    agent_provider = request.headers.get("x-agent-provider") or None
     version_id = body.version_id or "v1"
-    try:
-        existing = (
-            db.query(SiteAnalysis)
-            .filter(SiteAnalysis.site_id == site_id, SiteAnalysis.version_id == version_id)
-            .first()
-        )
-        result_json = json.dumps(result)
-        if existing:
-            existing.analysis_json = result_json
-        else:
-            db.add(SiteAnalysis(site_id=site_id, version_id=version_id, analysis_json=result_json))
-        db.commit()
-    except Exception:
-        db.rollback()  # non-fatal — still return the result
 
-    return result
+    from db.session import SessionLocal
+
+    def _run_and_save():
+        try:
+            result = run_comparative_analysis(
+                site_obj.target_url,
+                journey_dicts,
+                api_key=anthropic_key,
+                agent_api_key=agent_api_key,
+                agent_provider=agent_provider,
+            )
+        except Exception:
+            return
+        bg_db = SessionLocal()
+        try:
+            existing = (
+                bg_db.query(SiteAnalysis)
+                .filter(SiteAnalysis.site_id == site_id, SiteAnalysis.version_id == version_id)
+                .first()
+            )
+            result_json = json.dumps(result)
+            if existing:
+                existing.analysis_json = result_json
+            else:
+                bg_db.add(SiteAnalysis(site_id=site_id, version_id=version_id, analysis_json=result_json))
+            bg_db.commit()
+        except Exception:
+            bg_db.rollback()
+        finally:
+            bg_db.close()
+
+    background_tasks.add_task(_run_and_save)
+    return {"status": "running"}

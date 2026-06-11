@@ -1,0 +1,228 @@
+% ====================== SETTINGS FILE — CipherCorgi Poster (Portrait White) ===========================
+
+\documentclass[portrait,a0,final]{a0poster}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{epsf,pstricks}
+\usepackage{amsmath,amsfonts,amssymb,amsxtra}
+\usepackage{caption}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{cite}
+
+%%% page margins
+\usepackage[includeheadfoot,
+            top= 2.2cm, bottom=2cm,
+            left=2.2cm, right=4cm,
+            headsep=0mm, footskip=1mm]{geometry}
+
+%%% ETH Textstyle
+\usepackage{lmodern}
+\usepackage[scaled=.95]{helvet}
+\usepackage[helvet]{sfmath}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{microtype}
+
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric,arrows,positioning,shapes,calc,arrows,arrows.meta}
+
+% ====  ETH colors  ===
+\definecolor{ETH1}{RGB}{31,64,122}
+\definecolor{ETH2}{RGB}{72,90,44}
+\definecolor{ETH3}{RGB}{18,105,176}
+\definecolor{ETH4}{RGB}{114,121,28}
+\definecolor{ETH5}{RGB}{145,5,106}
+\definecolor{ETH6}{RGB}{111,111,100}
+\definecolor{ETH7}{RGB}{168,50,45}
+\definecolor{ETH8}{RGB}{0,122,150}
+\definecolor{ETH9}{RGB}{149,96,19}
+\definecolor{ETHBlue}{RGB}{33,92,175}
+
+\definecolor{lightblue}{rgb}{0.68, 0.85, 0.9}
+\definecolor{verylightblue}{rgb}{0.77, 0.85, 0.92}
+\definecolor{verylightgray}{rgb}{0.94, 0.94, 0.94}
+
+% ====  CipherCorgi palette  ===
+\definecolor{CCblue}{RGB}{24,95,165}
+\definecolor{CCbluehov}{RGB}{19,74,130}
+\definecolor{CCbluesoft}{RGB}{220,235,250}
+\definecolor{CCdark}{RGB}{26,43,66}
+\definecolor{CCsec}{RGB}{94,107,130}
+\definecolor{CCbg}{RGB}{247,249,252}
+\definecolor{CCborder}{RGB}{225,232,240}
+\definecolor{CChuman}{RGB}{136,19,66}
+\definecolor{CChumansoft}{RGB}{247,213,226}
+\definecolor{CCagent}{RGB}{50,73,75}
+\definecolor{CCagentsoft}{RGB}{224,236,238}
+\definecolor{CCred}{RGB}{199,62,29}
+\definecolor{CCredsoft}{RGB}{253,232,227}
+\definecolor{CCamber}{RGB}{217,119,6}
+\definecolor{CCambersoft}{RGB}{254,243,199}
+
+\usepackage[framemethod=TikZ]{mdframed}
+
+\mdfdefinestyle{smallframe-title}{%
+   linecolor=\linecolor,
+    roundcorner=0pt,
+    innertopmargin=50pt,
+   innerbottommargin=30pt,
+    innerrightmargin=30pt,
+    innerleftmargin=30pt,
+    backgroundcolor=\backgroundcolortitle}
+
+\mdfdefinestyle{smallframe-color}{%
+   linecolor=\linecolor,
+    roundcorner=0pt,
+    innertopmargin=30pt,
+   innerbottommargin=30pt,
+    innerrightmargin=30pt,
+    innerleftmargin=30pt,
+    backgroundcolor=\backgroundcolorcolor}
+
+\mdfdefinestyle{smallframe-white}{%
+   linecolor=\linecolor,
+    roundcorner=0pt,
+    innertopmargin=30pt,
+   innerbottommargin=30pt,
+    innerrightmargin=30pt,
+    innerleftmargin=30pt,
+    backgroundcolor=\backgroundcolorwhite}
+
+\newcommand\blfootnote[1]{%
+  \begingroup
+  \renewcommand\thefootnote{}\footnote{#1}%
+  \addtocounter{footnote}{-1}%
+  \endgroup
+}
+
+% ==== definition of textboxes ==========
+\def\exMinipage{787mm}
+\def\exHalfMinipage{393mm}
+\def\exThirdMinipage{250mm}
+\def\exFourthMinipage{187.5mm}
+\def\exFifthMinipage{150mm}
+\def\exSubHalfMinipage{385mm}
+% asymmetric columns: 38% left / 62% right
+\def\exLeftMinipage{295mm}
+\def\exLeftSubMinipage{287mm}
+\def\exRightMinipage{485mm}
+\def\exRightSubMinipage{477mm}
+
+%==================================================================================
+
+\begin{document}
+
+\include{Poster_content}
+
+{\phantom{\begin{tikzpicture}
+\includegraphics[scale=1]{eth_logo_kurz_pos_13.pdf}
+\end{tikzpicture}}
+%%% ETH-logo and Department
+\begin{tikzpicture}
+\includegraphics[width=16.666cm]{eth_logo_kurz_pos_13.pdf}
+\end{tikzpicture} \hspace{64.2cm}
+\begin{minipage}[b]{\exFifthMinipage}
+\department
+\end{minipage}
+\\[16pt]
+{\phantom{\begin{tikzpicture}
+\includegraphics[scale=2]{eth_logo_kurz_pos_13.pdf}
+\end{tikzpicture}}
+
+\colorbox{\postercolor}
+{
+\begin{minipage}[t]{\exMinipage}
+ \vspace{-0.2cm}
+ \hspace{-0.7cm}
+%TITLE ETC.
+\begin{minipage}[t]{\exMinipage}
+\begin{mdframed}[style=smallframe-title]
+\title
+\\
+\authors
+\\%
+\affiliations
+\end{mdframed}
+\end{minipage}
+\\[25pt]
+
+\hspace{-0.6cm}
+\begin{minipage}[t]{\exLeftMinipage}
+
+%=========================================================  LEFT SIDE
+\begin{minipage}[t]{\exLeftMinipage}%%% INTRODUCTION
+\LARGE{\textcolor{\backgroundcolortitle}{ \bf 1 \ Introduction}}\\[-10pt]
+\begin{minipage}[t]{\exLeftSubMinipage}
+\begin{mdframed}[style=smallframe-color, innertopmargin=22pt, innerbottommargin=22pt]
+\introtext
+\end{mdframed}
+\end{minipage}
+\end{minipage}%%% end Introduction
+\\[40pt]
+%%
+\begin{minipage}[t]{\exLeftMinipage}%%% WORKFLOW DIAGRAM
+\LARGE {\textcolor{\backgroundcolortitle}{\bf 2 \ Workflow}}\\[-10pt]
+\begin{minipage}[t]{\exLeftSubMinipage}
+\begin{mdframed}[style=smallframe-white, innertopmargin=4pt, innerbottommargin=4pt, innerleftmargin=4pt, innerrightmargin=4pt, backgroundcolor=white]
+\resultstext
+\end{mdframed}
+\end{minipage}
+\end{minipage}%%% end Workflow
+\\[40pt]
+%%%
+\begin{minipage}[t]{\exLeftMinipage}%%% USERS AND DATA
+\LARGE {\textcolor{\backgroundcolortitle}{  \bf 3 \ Users \& Data}}\\[-10pt]
+\begin{minipage}[t]{\exLeftSubMinipage}
+\begin{mdframed}[style=smallframe-white, innertopmargin=22pt, innerbottommargin=22pt]
+\methodtext
+\end{mdframed}
+\end{minipage}
+\end{minipage}%%% end Users and Data
+\\[40pt]
+\end{minipage}%%% end of left side
+\hspace{0.7cm}
+\begin{minipage}[t]{\exRightMinipage}
+%===========================================================  RIGHT SIDE
+
+\begin{minipage}[t]{\exRightMinipage}%%% USER INTERFACE
+\LARGE{\textcolor{\backgroundcolortitle}{   \bf 4 \ User Interface}}\\[-10pt]
+\begin{minipage}[t]{\exRightSubMinipage}
+\begin{mdframed}[style=smallframe-white, innertopmargin=6pt, innerbottommargin=6pt, innerleftmargin=4pt, innerrightmargin=4pt]
+\materialstext
+\end{mdframed}
+\end{minipage}
+\end{minipage}%%%% end User Interface
+\\[4pt]
+%%
+\begin{minipage}[t]{\exRightMinipage}%%% AGENT STEERING
+\LARGE{\textcolor{\backgroundcolortitle}{  \bf 5 \ Agent Steering \& Evaluation}}\\[-10pt]
+\begin{minipage}[t]{\exRightSubMinipage}
+\begin{mdframed}[style=smallframe-white, innertopmargin=4pt, innerbottommargin=4pt]
+\agentsteering
+\end{mdframed}
+\end{minipage}
+\end{minipage}%%% end Agent Steering
+\\[4pt]
+%%
+\begin{minipage}[t]{\exRightMinipage}%%% CONCLUSION
+\LARGE{\textcolor{\backgroundcolortitle}{  \bf 6 \ Conclusion}}\\[-10pt]
+\begin{minipage}[t]{\exRightSubMinipage}
+\begin{mdframed}[style=smallframe-color, innertopmargin=4pt, innerbottommargin=4pt]
+\conclusiontext
+\end{mdframed}
+\end{minipage}
+\end{minipage}%%% end Conclusion
+
+\end{minipage}\\[15pt]%%% end of right side
+%=======================================
+\end{minipage}%%% end of main frame
+}
+\\[10pt]
+\begin{minipage}[l]{\exMinipage}
+{
+\partner
+}
+\end{minipage}
+}} % close the two phantom groups opened at document start
+\end{document}

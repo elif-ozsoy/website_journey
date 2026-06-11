@@ -30,6 +30,9 @@ export default function AddAgentModal({ open, onClose, onAdd, onUpdate, existing
       setModel(initialAgent?.model ?? MODEL_OPTIONS[0].value)
       setPrompt(initialAgent?.prompt ?? '')
     }
+  // Intentionally keyed on `open` only: re-running on initial-value identity
+  // changes mid-edit would clobber the user's typing.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   function handleSubmit() {

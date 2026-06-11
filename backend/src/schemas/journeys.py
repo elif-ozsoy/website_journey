@@ -27,6 +27,7 @@ class JourneyResponse(BaseModel):
     source: str = 'agent'
     is_agent: bool | None = None
     embedding: list[float] | None = None
+    solution_eval: dict | None = None
     completed_at: datetime
     updated_at: datetime
 
@@ -38,6 +39,8 @@ class TaskSummary(BaseModel):
     title: str
     description: str | None
     order_index: int
+    focus_areas: list[str] | None = None
+    expected_solution: str | None = None
 
 
 class ProjectWithJourneys(BaseModel):

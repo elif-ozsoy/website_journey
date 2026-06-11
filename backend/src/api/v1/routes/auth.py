@@ -20,7 +20,7 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
     try:
         user, token = svc.register(db, body.username, body.password, body.email)
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return AuthResponse(access_token=token, user=UserResponse.model_validate(user))
 
 
@@ -29,7 +29,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     try:
         user, token = svc.login(db, body.username, body.password)
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc))
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     return AuthResponse(access_token=token, user=UserResponse.model_validate(user))
 
 

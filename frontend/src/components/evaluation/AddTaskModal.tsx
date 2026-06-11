@@ -1,20 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
 import type { FocusArea, Task } from '../../lib/types'
-import { FOCUS_AREA_LABELS } from '../../lib/types'
 
 interface Props {
   open: boolean
   onClose: () => void
-  onSubmit: (title: string, description: string, focusAreas: FocusArea[]) => Promise<void>
+  onSubmit: (title: string, description: string, focusAreas: FocusArea[], expectedSolution: string) => Promise<void>
   initialTask?: Task
 }
 
-const ALL_FOCUS_AREAS = Object.keys(FOCUS_AREA_LABELS) as FocusArea[]
 
 export default function AddTaskModal({ open, onClose, onSubmit, initialTask }: Props) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [focusAreas, setFocusAreas] = useState<FocusArea[]>([])
+  const [expectedSolution, setExpectedSolution] = useState('')
   const [saving, setSaving] = useState(false)
   const titleRef = useRef<HTMLInputElement>(null)
 
@@ -23,25 +22,24 @@ export default function AddTaskModal({ open, onClose, onSubmit, initialTask }: P
       setTitle(initialTask?.title ?? '')
       setDescription(initialTask?.description ?? '')
       setFocusAreas(initialTask?.focusAreas ?? [])
+      setExpectedSolution(initialTask?.expectedSolution ?? '')
       setSaving(false)
       setTimeout(() => titleRef.current?.focus(), 50)
     }
+  // Intentionally keyed on `open` only: re-running on initial-value identity
+  // changes mid-edit would clobber the user's typing.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   if (!open) return null
 
-  function toggleFocus(area: FocusArea) {
-    setFocusAreas(prev =>
-      prev.includes(area) ? prev.filter(a => a !== area) : [...prev, area]
-    )
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!title.trim()) return
     setSaving(true)
     try {
-      await onSubmit(title.trim(), description.trim(), focusAreas)
+      await onSubmit(title.trim(), description.trim(), focusAreas, expectedSolution.trim())
       onClose()
     } finally {
       setSaving(false)
@@ -82,6 +80,7 @@ export default function AddTaskModal({ open, onClose, onSubmit, initialTask }: P
             />
           </div>
 
+          {/* Focus areas (Speed, Confidence, Confusion, etc.) removed
           <div className="modal-field">
             <label className="modal-label">What to look out for <span className="modal-label-hint">(optional)</span></label>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
@@ -125,6 +124,18 @@ export default function AddTaskModal({ open, onClose, onSubmit, initialTask }: P
                 )
               })}
             </div>
+          </div>
+          */}
+
+          <div className="modal-field">
+            <label className="modal-label">Expected solution <span className="modal-label-hint">(optional)</span></label>
+            <textarea
+              className="modal-input modal-textarea"
+              value={expectedSolution}
+              onChange={e => setExpectedSolution(e.target.value)}
+              placeholder="What answer confirms the task was completed correctly? e.g. 'Ms. Meyer, Room 204' or 'Click Settings → Account → Delete'"
+              rows={3}
+            />
           </div>
 
           <div className="modal-footer">

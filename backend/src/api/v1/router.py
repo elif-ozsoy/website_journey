@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from api.v1.routes import analytics, auth, data_collection, dummy, evaluation, explain, journeys, policy, tasks, visualizations
+from api.v1.routes import analytics, annotate, auth, data_collection, dummy, evaluation, explain, journeys, policy, tasks, visualizations
 
 router = APIRouter(prefix="/v1")
 router.include_router(dummy.router)
@@ -14,3 +14,4 @@ router.include_router(visualizations.router)
 router.include_router(journeys.router)
 router.include_router(policy.router)
 router.include_router(explain.router)
+router.include_router(annotate.router)

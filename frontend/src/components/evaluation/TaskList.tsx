@@ -132,15 +132,15 @@ const TaskList = forwardRef<TaskListHandle, object>(function TaskList(_props: ob
 
   const visibleTasks = viewAll ? tasks : tasks.slice(0, 3)
 
-  async function handleAdd(title: string, description: string, focusAreas: FocusArea[]) {
-    const task = await api.createTask(siteId!, title, description || undefined)
-    setTasks([...tasks, { ...task, focusAreas }])
+  async function handleAdd(title: string, description: string, focusAreas: FocusArea[], expectedSolution: string) {
+    const task = await api.createTask(siteId!, title, description || undefined, focusAreas, expectedSolution || undefined)
+    setTasks([...tasks, task])
   }
 
-  async function handleEditSave(title: string, description: string, focusAreas: FocusArea[]) {
+  async function handleEditSave(title: string, description: string, focusAreas: FocusArea[], expectedSolution: string) {
     if (!editingTask) return
-    const updated = await api.updateTask(editingTask.id, title, description || undefined)
-    setTasks(tasks.map(t => t.id === editingTask.id ? { ...updated, focusAreas } : t))
+    const updated = await api.updateTask(editingTask.id, title, description || undefined, focusAreas, expectedSolution || undefined)
+    setTasks(tasks.map(t => t.id === editingTask.id ? updated : t))
   }
 
   async function handleGenerate() {

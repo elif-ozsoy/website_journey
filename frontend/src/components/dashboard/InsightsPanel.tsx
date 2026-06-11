@@ -3,10 +3,10 @@ import * as d3 from 'd3'
 import type { AgentStep } from '../agent/agentTypes'
 import type { JourneyResponse } from '../../lib/api'
 
-const AGENT_COLOR = '#185FA5'
-const HUMAN_COLOR = '#0d9488'
-const AGENT_PALETTE = ['#185FA5', '#378ADD', '#6BA8D4', '#9EC5E3', '#BEDAF2', '#DCEBFA']
-const HUMAN_PALETTE = ['#0d9488', '#14b8a6', '#2dd4bf', '#5eead4', '#99f6e4', '#ccfbf1']
+const AGENT_COLOR = '#32494B'
+const HUMAN_COLOR = '#881342'
+const AGENT_PALETTE = ['#32494B', '#3d5b5d', '#496e70', '#558183', '#619496', '#6da7a9']
+const HUMAN_PALETTE = ['#881342', '#9e1852', '#b41e62', '#ca2472', '#e02a82', '#f63092']
 
 const ACTION_TYPES = ['click_element', 'input_text', 'scroll', 'navigate', 'extract_content', 'other']
 

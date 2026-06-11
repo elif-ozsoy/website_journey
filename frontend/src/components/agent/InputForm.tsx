@@ -1,3 +1,4 @@
+import { storageKeys } from '../../lib/storage'
 import { useState, FormEvent } from "react";
 import { RunConfig } from "./agentTypes";
 
@@ -9,12 +10,12 @@ const EXAMPLES = [
   /*{ url: "https://github.com", task: "Navigate to trending repositories and find the most starred one today" },*/
 ];
 
-const STORAGE_KEY = (provider: string) => `cc_api_key_${provider}`;
+const STORAGE_KEY = storageKeys.providerApiKey;
 
 export default function InputForm({ onRun, defaultUrl, defaultTask }: Props) {
   const [url, setUrl] = useState(defaultUrl || "https://wikipedia.org");
   const [task, setTask] = useState(defaultTask || "Search for 'Ataturk' and find his birth year");
-  const [provider, setProvider] = useState<"nvidia" | "google">("nvidia");
+  const [provider, setProvider] = useState<"nvidia" | "google">("google");
   const [apiKey, setApiKey] = useState(() => localStorage.getItem(STORAGE_KEY("nvidia")) ?? "");
   const [model, setModel] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);

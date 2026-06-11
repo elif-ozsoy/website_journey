@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Link, useMatch, useNavigate } from 'react-router-dom'
+import { useMatch, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { getUser, clearUser } from '../../pages/LoginPage'
 import type { Project } from '../../lib/types'
@@ -10,16 +10,16 @@ import { ANTHROPIC_KEY_STORAGE } from '../../lib/api'
 // ─── API Key Modal ─────────────────────────────────────────────────────────────
 
 function ApiKeyModal({ onClose }: { onClose: () => void }) {
-  const { apiKey, setApiKey, provider, setProvider } = useAgentRun()
-  const [draft, setDraft] = useState(apiKey)
-  const [draftProvider, setDraftProvider] = useState(provider)
+  const { apiKey, setApiKey, googleApiKey, setGoogleApiKey } = useAgentRun()
+  const [draftNvidia, setDraftNvidia] = useState(apiKey)
+  const [draftGoogle, setDraftGoogle] = useState(googleApiKey)
   const [draftAnthropicKey, setDraftAnthropicKey] = useState(
     () => localStorage.getItem(ANTHROPIC_KEY_STORAGE) ?? ''
   )
 
   function handleSave() {
-    setApiKey(draft)
-    setProvider(draftProvider as 'nvidia' | 'google')
+    setApiKey(draftNvidia)
+    setGoogleApiKey(draftGoogle)
     if (draftAnthropicKey.trim()) {
       localStorage.setItem(ANTHROPIC_KEY_STORAGE, draftAnthropicKey.trim())
     } else {
@@ -37,18 +37,14 @@ function ApiKeyModal({ onClose }: { onClose: () => void }) {
         </div>
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
-            <label style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--gray700)', display: 'block', marginBottom: 6 }}>Agent Provider</label>
-            <select value={draftProvider} onChange={e => setDraftProvider(e.target.value as 'nvidia' | 'google')} className="input" style={{ width: '100%' }}>
-              <option value="nvidia">NVIDIA (free)</option>
-              <option value="google">Google Gemini</option>
-            </select>
-            <p style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', marginTop: 5 }}>
-              {draftProvider === 'nvidia' ? 'Get a free key at build.nvidia.com → sign up → API Keys.' : 'Get a key at aistudio.google.com → Get API key.'}
-            </p>
+            <label style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--gray700)', display: 'block', marginBottom: 6 }}>Google Gemini API Key</label>
+            <input type="password" placeholder="AIza…" value={draftGoogle} onChange={e => setDraftGoogle(e.target.value)} className="input" style={{ fontFamily: 'var(--font-sans)', width: '100%' }} autoComplete="off" />
+            <p style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', marginTop: 5 }}>Get a free key at aistudio.google.com → Get API key.</p>
           </div>
           <div>
-            <label style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--gray700)', display: 'block', marginBottom: 6 }}>Agent API Key</label>
-            <input type="password" placeholder={draftProvider === 'nvidia' ? 'nvapi-…' : 'AIza…'} value={draft} onChange={e => setDraft(e.target.value)} className="input" style={{ fontFamily: 'var(--font-sans)', width: '100%' }} autoComplete="off" />
+            <label style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--gray700)', display: 'block', marginBottom: 6 }}>NVIDIA NIM API Key</label>
+            <input type="password" placeholder="nvapi-…" value={draftNvidia} onChange={e => setDraftNvidia(e.target.value)} className="input" style={{ fontFamily: 'var(--font-sans)', width: '100%' }} autoComplete="off" />
+            <p style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', marginTop: 5 }}>Get a free key at build.nvidia.com → API Keys.</p>
           </div>
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
             <label style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--gray700)', display: 'block', marginBottom: 6 }}>Anthropic API Key</label>
@@ -71,9 +67,6 @@ function IcoHome() {
   return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M2 6.5L8 2l6 4.5V14a1 1 0 01-1 1H3a1 1 0 01-1-1V6.5z"/><path d="M6 15V9h4v6"/></svg>
 }
 
-function IcoProjects() {
-  return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>
-}
 
 function IcoOverview() {
   return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2"/></svg>
@@ -91,21 +84,34 @@ function IcoHeatmap() {
   return <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="5" r="3.5" strokeOpacity="0.35"/><circle cx="5" cy="5" r="1.8" strokeOpacity="0.65"/><circle cx="5" cy="5" r="0.6" fill="currentColor" stroke="none"/><circle cx="11" cy="11" r="2.5" strokeOpacity="0.35"/><circle cx="11" cy="11" r="1.2" strokeOpacity="0.65"/><circle cx="11" cy="11" r="0.6" fill="currentColor" stroke="none"/></svg>
 }
 
-function IcoTrajectory() {
-  return <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="3" r="1.5"/><circle cx="13" cy="8" r="1.5"/><path d="M4.5 8.5 Q8 9 9.5 4.5"/><path d="M9.5 4 Q13 4 11.5 8"/></svg>
+
+
+function IcoHorizonGraph() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1" y="3" width="14" height="4" rx="1" strokeOpacity="0.4" />
+      <path d="M1 5 Q4 3.5 6 5 Q8 6.5 10 5 Q12 3.5 15 4" />
+      <rect x="1" y="9" width="14" height="4" rx="1" strokeOpacity="0.4" />
+      <path d="M1 11 Q3 9.5 5 11 Q7 12.5 9 11 Q11 9.5 13 10 Q14 10.3 15 10" />
+    </svg>
+  )
 }
 
-function IcoTimeline() {
-  return <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.5l2.5 1.5"/></svg>
+function IcoLinkedFlow() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 3 Q7 3 9 5" strokeOpacity="0.8" />
+      <path d="M2 6 Q8 6 11 4" strokeOpacity="0.8" />
+      <line x1="2" y1="9" x2="14" y2="9" strokeOpacity="0.3" />
+      <path d="M2 13 Q4 11.5 6 13 Q8 14 10 12.5 Q12 11.5 14 12" />
+    </svg>
+  )
 }
 
 function IcoHumanVsAI() {
   return <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="4" r="2"/><path d="M1 12.5c0-2.2 1.8-3.5 4-3.5s4 1.3 4 3.5"/><circle cx="13" cy="4" r="2"/><path d="M10 12.5c0-2.2.8-3.5 3-3.5" strokeDasharray="2 1.5"/></svg>
 }
 
-function IcoAgentRun() {
-  return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><polygon points="4,2 14,8 4,14"/></svg>
-}
 
 function IcoSettings() {
   return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v1.5M8 13.5V15M15 8h-1.5M2.5 8H1M12.36 3.64l-1.06 1.06M4.7 11.3l-1.06 1.06M12.36 12.36l-1.06-1.06M4.7 4.7L3.64 3.64"/></svg>
@@ -117,16 +123,6 @@ function IcoLogout() {
 
 function IcoChevron() {
   return <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2l4 4-4 4"/></svg>
-}
-
-function IcoFlow() {
-  return <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="3" cy="4" r="1.3"/>
-    <circle cx="3" cy="12" r="1.3"/>
-    <circle cx="13" cy="8" r="1.3"/>
-    <path d="M4.2 4.3 Q9 5 11.8 7.4"/>
-    <path d="M4.2 11.7 Q9 11 11.8 8.6"/>
-  </svg>
 }
 
 // ─── Nav item ─────────────────────────────────────────────────────────────────
@@ -181,7 +177,7 @@ export default function AppSidebar() {
   const hostname = project?.url ? (() => { try { return new URL(project.url).hostname } catch { return '' } })() : ''
   const faviconUrl = hostname ? `https://www.google.com/s2/favicons?domain=${hostname}&sz=128` : null
 
-  const { runState, progress } = useAgentRun()
+  const { runState, progress, statusMsg, liveStepCount } = useAgentRun()
   const isRunning = runState === 'running' || runState === 'error'
 
   const user = getUser()
@@ -218,12 +214,11 @@ export default function AppSidebar() {
   ]
 
   const analysisViews = [
-    { view: 'aggregate', label: 'Aggregate Journeys', icon: <IcoSankey /> },
+    { view: 'aggregate', label: 'Human Steered Agent', icon: <IcoSankey /> },
     { view: 'heatmap', label: 'Heatmap', icon: <IcoHeatmap /> },
-    { view: 'details', label: 'Journey Flow', icon: <IcoTrajectory /> },
     { view: 'human_vs_ai', label: 'Human vs AI', icon: <IcoHumanVsAI /> },
-    { view: 'time_event', label: 'Time-Event-Overview', icon: <IcoTimeline /> },
-    { view: 'flow_sankey', label: 'Flow Diagram', icon: <IcoFlow /> },
+    { view: 'horizon_graph', label: 'Horizon Graph', icon: <IcoHorizonGraph /> },
+    { view: 'linked_flow', label: 'Flow + Horizon', icon: <IcoLinkedFlow /> },
 
   ]
 
@@ -324,12 +319,19 @@ export default function AppSidebar() {
         {isRunning && (
           <div style={{ padding: '8px 12px', flexShrink: 0 }}>
             {expanded && (
-              <div style={{ fontSize: 11, fontWeight: 600, color: runState === 'error' ? 'var(--red)' : 'var(--accent)', marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {runState === 'error' ? '⚠ Run stopped' : '⏳ Agent running…'}
-              </div>
+              <>
+                <div style={{ fontSize: 11, fontWeight: 600, color: runState === 'error' ? 'var(--red)' : 'var(--accent)', marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {runState === 'error' ? 'Run stopped' : statusMsg || 'Agent running…'}
+                </div>
+                {liveStepCount > 0 && runState !== 'error' && (
+                  <div style={{ fontSize: 10, color: 'var(--gray400)', marginBottom: 4 }}>
+                    Step {liveStepCount} · {progress}%
+                  </div>
+                )}
+              </>
             )}
             <div style={{ height: 3, borderRadius: 2, background: 'var(--gray100)', overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${progress}%`, background: runState === 'error' ? 'var(--red)' : 'var(--accent)', transition: 'width 0.4s' }} />
+              <div style={{ height: '100%', width: `${progress}%`, background: runState === 'error' ? 'var(--red)' : 'var(--accent)', transition: 'width 0.3s ease-out' }} />
             </div>
           </div>
         )}

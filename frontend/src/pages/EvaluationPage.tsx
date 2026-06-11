@@ -1,3 +1,4 @@
+import { storageKeys } from '../lib/storage'
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useProjectContext } from '../context/ProjectContext'
@@ -8,9 +9,9 @@ import type { Project } from '../lib/types'
 import { PROJECTS_STORAGE_KEY } from '../lib/types'
 import * as api from '../lib/api'
 
-export const ANALYSIS_STORAGE_KEY = (siteId: string, versionId: string) => `ciphercorgi_comparative_${siteId}_${versionId}`
+export const ANALYSIS_STORAGE_KEY = storageKeys.analysis
 
-export const VERSIONS_KEY = (siteId: string) => `ciphercorgi_versions_${siteId}`
+export const VERSIONS_KEY = storageKeys.versions
 
 export interface VersionEntry {
   id: string
@@ -42,12 +43,6 @@ function InfoTooltip({ text }: { text: string }) {
   )
 }
 
-const STEPS = [
-  { num: 1, label: 'Define Tasks', desc: 'What should testers try to accomplish?' },
-  { num: 2, label: 'Add Agents', desc: 'Which AI agents will run your tasks?' },
-  { num: 3, label: 'Collect Data', desc: 'Run agents & share the tester link.' },
-  { num: 4, label: 'Analysis', desc: 'Review results in the dashboard.' },
-]
 
 function WorkflowStepper({ tasksDone, dataDone, analyzeDone, step2Locked, step3Locked }: { tasksDone: boolean; agentsDone: boolean; dataDone: boolean; analyzeDone: boolean; step2Locked: boolean; step3Locked: boolean }) {
   const steps = [
@@ -70,12 +65,62 @@ function WorkflowStepper({ tasksDone, dataDone, analyzeDone, step2Locked, step3L
   )
 }
 
+type SteeringState = 'idle' | 'running' | 'complete' | 'error'
+
+function runSteeringTasks(
+  tasks: import('../lib/types').Task[],
+  siteUrl: string,
+  provider: 'nvidia' | 'google',
+  apiKey: string,
+  siteId: string,
+  userToken: string | null,
+  onStatus: (msg: string) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let taskIdx = 0
+
+    function runNext() {
+      if (taskIdx >= tasks.length) { resolve(); return }
+      const task = tasks[taskIdx]
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws/run`)
+      ws.onopen = () => {
+        onStatus(`Task ${taskIdx + 1}/${tasks.length} — ${task.title}`)
+        ws.send(JSON.stringify({
+          url: siteUrl,
+          task: task.title + (task.description ? '. ' + task.description : ''),
+          llm_provider: provider,
+          api_key: apiKey,
+          site_id: siteId,
+          task_id: task.id ?? null,
+          user_token: userToken,
+          use_policy: true,
+          run_mode: 'human_policy',
+        }))
+      }
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data)
+        if (msg.type === 'complete') { ws.close(); taskIdx++; runNext() }
+        else if (msg.type === 'error') { ws.close(); reject(new Error(msg.message)) }
+      }
+      ws.onerror = () => reject(new Error('WebSocket connection failed'))
+      ws.onclose = () => { /* handled above */ }
+    }
+
+    runNext()
+  })
+}
+
 export default function EvaluationPage() {
   const { siteId } = useParams<{ siteId: string }>()
   const navigate = useNavigate()
-  const { testerLink, siteUrl, label, tasks, agents, sessions, journeys, loading, refreshJourneys } = useProjectContext()
-  const { apiKey, runState, errorMsg, startRun, stopRun, runningSiteId, runningVersionId } = useAgentRun()
+  const { testerLink, siteUrl, tasks, agents, sessions, journeys, loading, refreshJourneys } = useProjectContext()
+  const { apiKey, googleApiKey, provider, runState, errorMsg, startRun, stopRun, runningSiteId, runningVersionId } = useAgentRun()
   const taskListRef = useRef<TaskListHandle>(null)
+
+  const [steeringState, setSteeringState] = useState<SteeringState>('idle')
+  const [steeringStatus, setSteeringStatus] = useState('')
+  const steeringAbortRef = useRef(false)
 
   const [copied, setCopied] = useState(false)
   // websiteType and goals are frontend-only extras stored locally
@@ -86,14 +131,14 @@ export default function EvaluationPage() {
 
   const versions = getVersions(siteId!, testerLink)
   const latestVersionId = versions[versions.length - 1]?.id ?? 'v1'
-  const VERSION_STORAGE_KEY = `ciphercorgi_last_version_${siteId}`
+  const VERSION_STORAGE_KEY = storageKeys.lastVersion(siteId!)
   const [selectedVersion, setSelectedVersion] = useState(
     () => localStorage.getItem(VERSION_STORAGE_KEY) ?? latestVersionId,
   )
 
   useEffect(() => {
     if (selectedVersion) localStorage.setItem(VERSION_STORAGE_KEY, selectedVersion)
-  }, [selectedVersion])
+  }, [selectedVersion, VERSION_STORAGE_KEY])
 
   // Refresh journey count after a run completes
   useEffect(() => {
@@ -125,6 +170,17 @@ export default function EvaluationPage() {
   )
   const humanJourneys = versionedSessions.length
   const agentJourneys = versionedJourneys.length
+
+  // Smart-skip: compute which tasks already have agent journeys
+  const existingAgentTaskIds = new Set(
+    versionedJourneys
+      .filter(j => j.is_agent)
+      .map(j => j.task_id)
+      .filter((id): id is number => id !== null)
+  )
+  const newTasks = tasks.filter(t => !existingAgentTaskIds.has(t.id))
+  const hasNewTasks = newTasks.length > 0
+  const hasExistingJourneys = existingAgentTaskIds.size > 0
 
   const step1Done = tasks.length > 0
   const step2Done = humanJourneys > 0 || agentJourneys > 0
@@ -162,6 +218,26 @@ export default function EvaluationPage() {
     })
   }
 
+  async function handleSteeringRun() {
+    if (steeringState === 'running') { steeringAbortRef.current = true; setSteeringState('idle'); setSteeringStatus(''); return }
+    steeringAbortRef.current = false
+    const steeringKey = googleApiKey.trim() || apiKey.trim()
+    if (!steeringKey) { setSteeringStatus('Set an API key in account settings (top right).'); return }
+    if (tasks.length === 0) { setSteeringStatus('Add at least one task to run the steered agent.'); return }
+    const steeringProvider: 'nvidia' | 'google' = googleApiKey.trim() ? 'google' : (provider === 'google' ? 'google' : 'nvidia')
+    const userToken = localStorage.getItem(storageKeys.token) ?? null
+    setSteeringState('running')
+    setSteeringStatus(`Starting steered agent for ${tasks.length} task${tasks.length !== 1 ? 's' : ''}…`)
+    try {
+      await runSteeringTasks(tasks, siteUrl, steeringProvider, steeringKey, siteId!, userToken, (msg) => {
+        if (!steeringAbortRef.current) setSteeringStatus(msg)
+      })
+      if (!steeringAbortRef.current) { setSteeringState('complete'); setSteeringStatus(''); refreshJourneys() }
+    } catch (err) {
+      if (!steeringAbortRef.current) { setSteeringState('error'); setSteeringStatus((err as Error).message) }
+    }
+  }
+
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 58px)', color: 'var(--gray400)' }}>
@@ -177,16 +253,13 @@ export default function EvaluationPage() {
       <div className="eval-ctx-bar">
         <div className="eval-ctx-bar-inner">
 
-          {/* Back → Home */}
-          <button
-            onClick={() => navigate('/projects')}
-            title="Back to Home"
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', background: 'none', cursor: 'pointer', color: 'var(--gray400)', flexShrink: 0, transition: 'background 0.1s, color 0.1s' }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gray100)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--gray900)' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--gray400)' }}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3L5 8l5 5"/></svg>
-          </button>
+          {/* Left: back + view name */}
+          <div className="dash-topbar-left">
+            <button onClick={() => navigate('/projects')} title="Back to Home" className="dash-topbar-back">
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3L5 8l5 5"/></svg>
+            </button>
+            <span className="dash-topbar-view-name">Project Overview</span>
+          </div>
 
           <div style={{ flex: 1 }} />
 
@@ -295,6 +368,37 @@ export default function EvaluationPage() {
             {humanJourneys > 0 && (
               <span className="eval-collect-status eval-collect-status--blue">✓ {humanJourneys} session{humanJourneys !== 1 ? 's' : ''} recorded</span>
             )}
+
+            <p className="eval-collect-card-desc" style={{ marginTop: 16, marginBottom: 8 }}>
+              After collecting enough journeys, summarize them with a steered agent.
+            </p>
+            <button
+              className="btn btn-primary"
+              disabled={tasks.length === 0 || humanJourneys === 0 || !apiKey.trim() && !googleApiKey.trim()}
+              onClick={handleSteeringRun}
+            >
+              {steeringState === 'running' ? '⏹ Stop steered agent'
+                : steeringState === 'complete' ? 'Re-run steered agent →'
+                : 'Run steered agent →'}
+            </button>
+            {steeringState === 'complete' && (
+              <span className="eval-collect-status eval-collect-status--blue" style={{ marginTop: 8 }}>✓ Steered agent run completed</span>
+            )}
+            {steeringState === 'running' && steeringStatus && (
+              <p className="eval-btn-hint" style={{ textAlign: 'left', color: 'var(--gray400)' }}>{steeringStatus}</p>
+            )}
+            {steeringState === 'error' && steeringStatus && (
+              <p className="eval-btn-hint" style={{ textAlign: 'left', color: 'var(--red)' }}>{steeringStatus}</p>
+            )}
+            {tasks.length === 0 && (
+              <p className="eval-btn-hint" style={{ textAlign: 'left' }}>Add at least one task above to run the steered agent.</p>
+            )}
+            {humanJourneys === 0 && tasks.length > 0 && (
+              <p className="eval-btn-hint" style={{ textAlign: 'left' }}>Collect at least one human tester session before running the steered agent.</p>
+            )}
+            {!apiKey.trim() && !googleApiKey.trim() && tasks.length > 0 && humanJourneys > 0 && (
+              <p className="eval-btn-hint" style={{ textAlign: 'left' }}>Set your API key in account settings (top right).</p>
+            )}
           </div>
 
           {/* AI branch */}
@@ -312,18 +416,44 @@ export default function EvaluationPage() {
             <AgentGallery activeVersionId={activeVersionId} />
             {effectiveRunState === 'complete' && <span className="eval-collect-status eval-collect-status--blue" style={{ marginBottom: 12 }}>✓ Agent run completed</span>}
             {effectiveRunState === 'idle' && agentJourneys > 0 && <span className="eval-collect-status eval-collect-status--blue" style={{ marginBottom: 12 }}>✓ {agentJourneys} journey{agentJourneys !== 1 ? 's' : ''} recorded</span>}
+            {/* Primary run button — smart skip: only runs tasks without existing journeys */}
             <button
               className="btn btn-primary"
               disabled={selectedAgentCount === 0 || !apiKey.trim()}
               onClick={() => {
                 if (effectiveRunState === 'running') { stopRun() }
-                else { stopRun(); startRun(siteId!, siteUrl, tasks, activeVersionId, agents.filter(a => a.selected)) }
+                else {
+                  const tasksToRun = (hasNewTasks && hasExistingJourneys) ? newTasks : tasks
+                  stopRun(); startRun(siteId!, siteUrl, tasksToRun, activeVersionId, agents.filter(a => a.selected))
+                }
               }}
             >
               {effectiveRunState === 'running' ? '⏹ Stop running'
-                : agentJourneys > 0 || effectiveRunState === 'complete' ? 'Re-run agents →'
-                : 'Run agents →'}
+                : hasNewTasks && hasExistingJourneys
+                  ? `Run ${newTasks.length} new task${newTasks.length !== 1 ? 's' : ''} →`
+                  : hasExistingJourneys
+                    ? 'Re-run all →'
+                    : 'Run agents →'}
             </button>
+
+            {/* Secondary button — force re-run all when some tasks are already done */}
+            {hasNewTasks && hasExistingJourneys && effectiveRunState !== 'running' && (
+              <button
+                className="btn btn-outline btn-sm"
+                disabled={selectedAgentCount === 0 || !apiKey.trim()}
+                onClick={() => { stopRun(); startRun(siteId!, siteUrl, tasks, activeVersionId, agents.filter(a => a.selected)) }}
+                style={{ marginTop: 6 }}
+              >
+                Re-run all {tasks.length} tasks ↺
+              </button>
+            )}
+
+            {/* Info hint when tasks are being skipped */}
+            {hasNewTasks && hasExistingJourneys && effectiveRunState === 'idle' && (
+              <p className="eval-btn-hint" style={{ textAlign: 'left', color: 'var(--gray400)' }}>
+                {existingAgentTaskIds.size} of {tasks.length} tasks already have journeys and will be skipped.
+              </p>
+            )}
             {selectedAgentCount === 0 && (
               <p className="eval-btn-hint" style={{ textAlign: 'left' }}>Select at least one agent above to run.</p>
             )}

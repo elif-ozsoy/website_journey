@@ -139,7 +139,7 @@ export function aggregateJourneys(journeys: AgentStep[][]): AgentStep[] {
   let stepNumber = 1
   const commonSeq = mostCommonSequence as PageSequenceStats
 
-  commonSeq.actions.forEach((pageActions, pageIdx) => {
+  commonSeq.actions.forEach((pageActions, _pageIdx) => {
     const mostCommon = getMostCommonAction(pageActions)
     if (mostCommon) {
       aggregated.push({

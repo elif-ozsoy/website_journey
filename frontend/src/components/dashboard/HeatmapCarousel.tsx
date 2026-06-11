@@ -1,118 +1,105 @@
-import { useMemo, useState, useRef, useEffect } from 'react'
+import { useMemo, useState, useRef, useEffect, type ReactNode } from 'react'
 import type { AgentStep } from '../agent/agentTypes'
-import type { JourneyResponse } from '../../lib/api'
+import type { JourneyResponse, ScreenshotMeta } from '../../lib/api'
+import * as api from '../../lib/api'
 import type { Task } from '../../lib/types'
 import { HeatmapCanvas } from './ScreenshotCarousel'
-import { getAggregatedScreenshots } from './screenshotData'
+import { getAggregatedScreenshots, type HumanTaskJourney } from './screenshotData'
 
 interface Props {
   agentJourneys: JourneyResponse[]
-  humanSessionSteps: Map<string, AgentStep[]>
+  humanJourneysBySession: Map<string, HumanTaskJourney[]>
   loading: boolean
   tasks?: Task[]
+  taskFilter?: Set<number> | null
+  onTaskChange?: (taskId: number | null) => void
+  rightControl?: ReactNode
 }
 
-function shortenUrl(url: string): string {
-  try {
-    const u = new URL(url)
-    const path = (u.pathname || '/').replace(/\/$/, '') || '/'
-    return path.length > 35 ? path.slice(0, 35) + '…' : path
-  } catch {
-    return url.slice(0, 35)
-  }
-}
-
-function FilterPill({ label, active, color, onClick }: { label: string; active: boolean; color: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4,
-        padding: '3px 9px', borderRadius: 999, cursor: 'pointer', border: 'none',
-        fontSize: 'var(--fs-small)', fontWeight: 600, fontFamily: 'var(--font-sans)',
-        background: active ? color : 'var(--gray100)',
-        color: active ? '#fff' : 'var(--text-secondary)',
-        transition: 'background 0.13s, color 0.13s',
-        whiteSpace: 'nowrap',
-        flexShrink: 0,
-      }}
-    >
-      {label}
-    </button>
-  )
-}
-
-export default function HeatmapCarousel({ agentJourneys, humanSessionSteps, loading, tasks = [] }: Props) {
+export default function HeatmapCarousel({ agentJourneys, humanJourneysBySession, loading, tasks = [], taskFilter = null, onTaskChange, rightControl }: Props) {
   const [pageIdx, setPageIdx] = useState(0)
+  const [shotIdx, setShotIdx] = useState(0)
   const viewportRef = useRef<HTMLDivElement>(null)
-  const [vpSize, setVpSize] = useState({ w: 0, h: 0 })
+  const [vpSize, setVpSize] = useState({ w: 0, h: 0, scrollH: 0 })
 
-  // Journey selection state: null = all selected
-  const [agentFilter, setAgentFilter] = useState<Set<number> | null>(null)
-  const [humanFilter, setHumanFilter] = useState<Set<string> | null>(null)
-  const [taskFilter, setTaskFilter] = useState<number | null>(null)
+  // Notify parent only when a single task is selected (used by insights panel title).
+  useEffect(() => {
+    if (!taskFilter || taskFilter.size !== 1) {
+      onTaskChange?.(null)
+      return
+    }
+    onTaskChange?.(Array.from(taskFilter)[0])
+  }, [taskFilter, onTaskChange])
 
   useEffect(() => {
     const el = viewportRef.current
     if (!el) return
-    const ro = new ResizeObserver(entries => {
-      const { width, height } = entries[0].contentRect
-      setVpSize({ w: Math.round(width), h: Math.round(height) })
-    })
+    const update = () => {
+      const { width, height } = el.getBoundingClientRect()
+      const scrollH = el.scrollHeight
+      setVpSize({ w: Math.round(width), h: Math.round(height), scrollH: Math.round(scrollH) })
+    }
+    const ro = new ResizeObserver(update)
     ro.observe(el)
-    return () => ro.disconnect()
+    el.addEventListener('load', update, true)
+    return () => { ro.disconnect(); el.removeEventListener('load', update, true) }
   }, [])
 
-  const filteredAgentJourneys = useMemo(() => {
-    let result = agentJourneys
-    if (taskFilter !== null) result = result.filter(j => j.task_id === taskFilter)
-    if (agentFilter !== null) result = result.filter(j => agentFilter.has(j.id))
-    return result
-  }, [agentJourneys, agentFilter, taskFilter])
+  // Agent journeys for the selected task only (global agentFilter already applied upstream)
+  const taskAgentJourneys = useMemo(() => {
+    return taskFilter !== null
+      ? agentJourneys.filter(j => j.task_id !== null && taskFilter.has(Number(j.task_id)))
+      : agentJourneys
+  }, [agentJourneys, taskFilter])
 
+  // Fetch all screenshots for agent journeys — same approach as ActionPointsList.
+  // These include every step's screenshot_base64-derived image and let us prefer
+  // click-trigger screenshots (showing dropdowns open, menus visible, etc.)
+  const [journeyScreenshots, setJourneyScreenshots] = useState<ScreenshotMeta[]>([])
+  const journeyIdsKey = taskAgentJourneys.map(j => j.id).join(',')
+  useEffect(() => {
+    if (taskAgentJourneys.length === 0) { setJourneyScreenshots([]); return }
+    Promise.all(taskAgentJourneys.map(j => api.listJourneyScreenshots(j.id)))
+      .then(results => setJourneyScreenshots(results.flat()))
+      .catch(() => {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [journeyIdsKey])
+
+  // Human steps filtered by task (global sessionFilter already applied upstream)
   const filteredHumanSteps = useMemo(() => {
-    if (humanFilter === null) return humanSessionSteps
-    const filtered = new Map<string, AgentStep[]>()
-    for (const [id, steps] of humanSessionSteps) {
-      if (humanFilter.has(id)) filtered.set(id, steps)
+    const selectedTaskTitles = taskFilter === null
+      ? null
+      : new Set(tasks.filter(t => taskFilter.has(t.id)).map(t => t.title))
+    const result = new Map<string, AgentStep[]>()
+
+    for (const [sessionId, journeys] of humanJourneysBySession) {
+      const matched = journeys.filter(tj => {
+        if (taskFilter === null) return true
+        if (tj.taskId !== null) return taskFilter.has(Number(tj.taskId))
+        return selectedTaskTitles ? selectedTaskTitles.has(tj.taskTitle) : false
+      })
+      const steps = matched.flatMap(tj => tj.steps)
+      if (steps.length > 0) result.set(sessionId, steps)
     }
-    return filtered
-  }, [humanSessionSteps, humanFilter])
+
+    return result
+  }, [humanJourneysBySession, taskFilter, tasks])
 
   const pages = useMemo(() => {
-    const agentStepArrays = filteredAgentJourneys.map(j => j.steps as AgentStep[])
+    const agentStepArrays = taskAgentJourneys.map(j => j.steps as AgentStep[])
     const humanStepArrays = Array.from(filteredHumanSteps.values())
-    return getAggregatedScreenshots(agentStepArrays, humanStepArrays)
-  }, [filteredAgentJourneys, filteredHumanSteps])
+    return getAggregatedScreenshots(agentStepArrays, humanStepArrays, journeyScreenshots)
+  }, [taskAgentJourneys, filteredHumanSteps, journeyScreenshots])
 
   // Reset page index when pages change
   useEffect(() => {
     setPageIdx(p => Math.min(p, Math.max(0, pages.length - 1)))
   }, [pages.length])
 
+  // Reset shot index when page changes
+  useEffect(() => { setShotIdx(0) }, [pageIdx])
+
   const page = pages[Math.min(pageIdx, pages.length - 1)]
-
-  const humanSessionIds = Array.from(humanSessionSteps.keys())
-
-  function toggleAgent(id: number) {
-    setAgentFilter(prev => {
-      const allIds = agentJourneys.map(j => j.id)
-      const current = prev === null ? new Set(allIds) : new Set(prev)
-      if (current.has(id)) { current.delete(id) } else { current.add(id) }
-      if (current.size === allIds.length) return null
-      return current
-    })
-  }
-
-  function toggleHuman(id: string) {
-    setHumanFilter(prev => {
-      const allIds = humanSessionIds
-      const current = prev === null ? new Set(allIds) : new Set(prev)
-      if (current.has(id)) { current.delete(id) } else { current.add(id) }
-      if (current.size === allIds.length) return null
-      return current
-    })
-  }
 
   const hasAgent = page?.heatmapDots?.some(d => d.kind === 'agent') ?? false
   const hasHuman = page?.heatmapDots?.some(d => d.kind === 'human') ?? false
@@ -132,7 +119,7 @@ export default function HeatmapCarousel({ agentJourneys, humanSessionSteps, load
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 8, color: 'var(--gray400)', fontSize: 'var(--fs-body)' }}>
         <span style={{ fontSize: 'var(--fs-headline)' }}>🗺</span>
-        No journey data to display.
+        No journey data for selected task filters.
       </div>
     )
   }
@@ -140,105 +127,54 @@ export default function HeatmapCarousel({ agentJourneys, humanSessionSteps, load
   const safePageIdx = Math.min(pageIdx, pages.length - 1)
   const agentDotCount = page?.heatmapDots?.filter(d => d.kind === 'agent').length ?? 0
   const humanDotCount = page?.heatmapDots?.filter(d => d.kind === 'human').length ?? 0
-  const attentionDotCount = page?.heatmapDots?.filter(d => d.kind === 'attention').length ?? 0
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
-      {/* Header */}
-      <div className="sc-header" style={{ padding: '8px 16px', marginBottom: 0, borderBottom: '1px solid var(--gray100)', flexShrink: 0 }}>
-        <div className="sc-header-left">
-          <span className="sc-page-label">{page?.pageLabel}</span>
-          <span className="sc-page-url">{page?.pageUrl}</span>
-        </div>
-        <div className="sc-nav">
-          <button className="sc-arrow" disabled={safePageIdx === 0} onClick={() => setPageIdx(p => p - 1)}>←</button>
-          <div className="sc-dots">
-            {pages.map((p, i) => (
-              <button key={i} className={`sc-dot${i === safePageIdx ? ' active' : ''}`} onClick={() => setPageIdx(i)} title={p.pageLabel} />
-            ))}
-          </div>
-          <button className="sc-arrow" disabled={safePageIdx === pages.length - 1} onClick={() => setPageIdx(p => p + 1)}>→</button>
-        </div>
-      </div>
-
-      {/* Task filter */}
-      {tasks.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 16px', borderBottom: '1px solid var(--gray100)', flexShrink: 0, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Task</span>
-          <FilterPill label="All" active={taskFilter === null} color="var(--gray500)" onClick={() => setTaskFilter(null)} />
-          {tasks.map(t => (
-            <FilterPill key={t.id} label={t.title.length > 40 ? t.title.slice(0, 39) + '…' : t.title} active={taskFilter === t.id} color="var(--accent)" onClick={() => setTaskFilter(taskFilter === t.id ? null : t.id)} />
+      {/* Combined controls bar: page nav + legend + screenshot cycling */}
+      <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray100)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {/* Page navigation */}
+        <button className="sc-arrow" style={{ fontSize: 13 }} disabled={safePageIdx === 0} onClick={() => setPageIdx(p => p - 1)}>←</button>
+        <div className="sc-dots" style={{ gap: 3 }}>
+          {pages.map((p, i) => (
+            <button key={i} className={`sc-dot${i === safePageIdx ? ' active' : ''}`} onClick={() => setPageIdx(i)} title={p.pageLabel} />
           ))}
         </div>
-      )}
+        <button className="sc-arrow" style={{ fontSize: 13 }} disabled={safePageIdx === pages.length - 1} onClick={() => setPageIdx(p => p + 1)}>→</button>
 
-      {/* Journey selection + legend row */}
-      <div style={{ display: 'flex', gap: 10, padding: '6px 16px', alignItems: 'center', borderBottom: '1px solid var(--gray100)', flexWrap: 'wrap', flexShrink: 0 }}>
-        {agentJourneys.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-            <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Agent</span>
-            <FilterPill label="All" active={agentFilter === null} color="#185FA5" onClick={() => setAgentFilter(null)} />
-            {agentJourneys.map((j, i) => (
-              <FilterPill
-                key={j.id}
-                label={`Run #${i + 1}`}
-                active={agentFilter === null || agentFilter.has(j.id)}
-                color="#185FA5"
-                onClick={() => toggleAgent(j.id)}
-              />
-            ))}
-          </div>
-        )}
-        {humanSessionIds.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-            <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Human</span>
-            <FilterPill label="All" active={humanFilter === null} color="#b45309" onClick={() => setHumanFilter(null)} />
-            {humanSessionIds.map((id, i) => (
-              <FilterPill
-                key={id}
-                label={`User ${i + 1}`}
-                active={humanFilter === null || humanFilter.has(id)}
-                color="#b45309"
-                onClick={() => toggleHuman(id)}
-              />
-            ))}
-          </div>
-        )}
-        {loading && (
-          <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', marginLeft: 'auto' }}>
-            <span style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', width: 5, height: 5, borderRadius: '50%', background: 'var(--gray400)', display: 'inline-block', marginRight: 4 }} />
-            loading sessions…
-          </span>
-        )}
-      </div>
+        {/* Divider */}
+        <span style={{ width: 1, height: 14, background: 'var(--gray200)', flexShrink: 0 }} />
 
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: 12, padding: '6px 16px', alignItems: 'center', flexShrink: 0, borderBottom: '1px solid var(--gray100)' }}>
-        <span style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Heatmap:</span>
-        {agentDotCount > 0 && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 'var(--fs-small)', color: '#185FA5' }}>
-            <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(0,0,255,0.5)', border: '1.5px solid rgba(24,95,165,0.8)', display: 'inline-block' }} />
-            Agent clicks ({agentDotCount})
-          </span>
+        {/* Legend */}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: agentDotCount > 0 ? '#32494B' : 'var(--gray300)', flexShrink: 0 }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#32494B', display: 'inline-block', flexShrink: 0 }} />
+          Agent
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: humanDotCount > 0 ? '#881342' : 'var(--gray300)', flexShrink: 0 }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#881342', display: 'inline-block', flexShrink: 0 }} />
+          Human
+        </span>
+
+        {/* Screenshot cycling */}
+        {page?.screenshotUrls && page.screenshotUrls.length > 1 && (
+          <>
+            <span style={{ width: 1, height: 14, background: 'var(--gray200)', flexShrink: 0 }} />
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 'var(--fs-small)', color: 'var(--gray400)', flexShrink: 0 }}>
+              <button
+                onClick={() => setShotIdx(i => Math.max(0, i - 1))}
+                disabled={shotIdx === 0}
+                style={{ background: 'none', border: 'none', cursor: shotIdx === 0 ? 'default' : 'pointer', color: shotIdx === 0 ? 'var(--gray200)' : 'var(--gray500)', fontSize: 11, padding: '0 1px', lineHeight: 1 }}
+              >◀</button>
+              Shot {Math.min(shotIdx, page.screenshotUrls.length - 1) + 1}/{page.screenshotUrls.length}
+              <button
+                onClick={() => setShotIdx(i => Math.min(page.screenshotUrls!.length - 1, i + 1))}
+                disabled={shotIdx >= page.screenshotUrls.length - 1}
+                style={{ background: 'none', border: 'none', cursor: shotIdx >= page.screenshotUrls.length - 1 ? 'default' : 'pointer', color: shotIdx >= page.screenshotUrls.length - 1 ? 'var(--gray200)' : 'var(--gray500)', fontSize: 11, padding: '0 1px', lineHeight: 1 }}
+              >▶</button>
+            </span>
+          </>
         )}
-        {humanDotCount > 0 && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 'var(--fs-small)', color: '#b45309' }}>
-            <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(255,100,0,0.5)', border: '1.5px solid rgba(180,83,9,0.8)', display: 'inline-block' }} />
-            Human clicks ({humanDotCount})
-          </span>
-        )}
-        {attentionDotCount > 0 && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 'var(--fs-small)', color: '#15803d' }}>
-            <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(0,200,80,0.5)', border: '1.5px solid rgba(21,128,61,0.8)', display: 'inline-block' }} />
-            Agent attention ({attentionDotCount})
-          </span>
-        )}
-        {hasAgent && hasHuman && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 'var(--fs-small)', color: '#7c3aed' }}>
-            <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(124,58,237,0.5)', border: '1.5px solid rgba(124,58,237,0.8)', display: 'inline-block' }} />
-            Overlap
-          </span>
-        )}
+
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>{rightControl}</div>
       </div>
 
       {/* Browser mock + heatmap */}
@@ -249,8 +185,30 @@ export default function HeatmapCarousel({ agentJourneys, humanSessionSteps, load
         </div>
 
         <div className="sc-viewport" ref={viewportRef} style={{ position: 'relative', flex: 1, overflow: 'auto', minHeight: 0 }}>
-          {page?.screenshotUrl ? (
-            <img src={page.screenshotUrl} className="sc-real-screenshot" alt={page.pageLabel} />
+          {page?.screenshotUrls && page.screenshotUrls.length > 0 ? (
+            <img
+              src={page.screenshotUrls[Math.min(shotIdx, page.screenshotUrls.length - 1)]}
+              className="sc-real-screenshot"
+              alt={page.pageLabel}
+              onLoad={() => {
+                const el = viewportRef.current
+                if (!el) return
+                const { width, height } = el.getBoundingClientRect()
+                setVpSize({ w: Math.round(width), h: Math.round(height), scrollH: Math.round(el.scrollHeight) })
+              }}
+            />
+          ) : page?.screenshotUrl ? (
+            <img
+              src={page.screenshotUrl}
+              className="sc-real-screenshot"
+              alt={page.pageLabel}
+              onLoad={() => {
+                const el = viewportRef.current
+                if (!el) return
+                const { width, height } = el.getBoundingClientRect()
+                setVpSize({ w: Math.round(width), h: Math.round(height), scrollH: Math.round(el.scrollHeight) })
+              }}
+            />
           ) : (
             <>
               <div className="sc-section" style={{ top: '0%', left: '0%', width: '100%', height: '9%', background: '#e8eaf0' }}>
@@ -265,24 +223,18 @@ export default function HeatmapCarousel({ agentJourneys, humanSessionSteps, load
             </>
           )}
 
-          {page?.heatmapDots && page.heatmapDots.length > 0 && vpSize.w > 0 && (
+          {page?.heatmapDots && page.heatmapDots.length > 0 && vpSize.w > 0 && vpSize.h > 0 && (
             <HeatmapCanvas
               dots={page.heatmapDots}
               width={vpSize.w}
-              height={vpSize.h}
+              height={vpSize.scrollH > vpSize.h ? vpSize.scrollH : vpSize.h}
               colorMode={colorMode}
+              fitToContent
             />
           )}
         </div>
       </div>
 
-      {/* Summary strip */}
-      <div style={{ padding: '8px 16px', display: 'flex', gap: 16, fontSize: 'var(--fs-small)', color: 'var(--gray400)', borderTop: '1px solid var(--gray100)', flexShrink: 0 }}>
-        <span>{agentDotCount} agent click{agentDotCount !== 1 ? 's' : ''}</span>
-        <span>{humanDotCount} human click{humanDotCount !== 1 ? 's' : ''}</span>
-        {attentionDotCount > 0 && <span>{attentionDotCount} attention</span>}
-        <span style={{ marginLeft: 'auto' }}>{pages.length} page{pages.length !== 1 ? 's' : ''} total</span>
-      </div>
     </div>
   )
 }

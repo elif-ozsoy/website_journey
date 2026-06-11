@@ -1,14 +1,23 @@
-import type { Task, Session, EventRow } from './types'
+import { debug } from './debug'
+import { storageKeys } from './storage'
+import type { Task, Session, EventRow, FocusArea } from './types'
 
 const BASE = '/api'
 
-export const ANTHROPIC_KEY_STORAGE = 'cc_api_key_anthropic'
+export const ANTHROPIC_KEY_STORAGE = storageKeys.anthropicKey
+
+/** Header values must be ISO-8859-1 or fetch() throws for EVERY request.
+ *  Pasted API keys often carry invisible Unicode (NBSP, smart quotes, '…').
+ *  Valid keys/tokens are pure ASCII, so stripping the rest is always safe. */
+function headerSafe(v: string | null): string {
+  return (v ?? '').replace(/[^\x20-\x7E]/g, '').trim()
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('ciphercorgi_token')
-  const anthropicKey = localStorage.getItem(ANTHROPIC_KEY_STORAGE)
-  const agentKey = localStorage.getItem('ciphercorgi_apikey')
-  const agentProvider = localStorage.getItem('ciphercorgi_provider')
+  const token = headerSafe(localStorage.getItem(storageKeys.token))
+  const anthropicKey = headerSafe(localStorage.getItem(ANTHROPIC_KEY_STORAGE))
+  const agentKey = headerSafe(localStorage.getItem(storageKeys.agentApiKey))
+  const agentProvider = headerSafe(localStorage.getItem(storageKeys.agentProvider))
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
@@ -93,22 +102,58 @@ export function createProject(url: string, label: string) {
 
 // ─── Tasks ───────────────────────────────────────────────────────────────────
 
+function normalizeTask(t: Record<string, unknown>): Task {
+  return {
+    id: t.id as number,
+    siteId: (t.site_id ?? t.siteId) as string,
+    title: t.title as string,
+    description: (t.description ?? null) as string | null,
+    orderIndex: (t.order_index ?? t.orderIndex ?? 0) as number,
+    createdAt: (t.created_at ?? t.createdAt ?? '') as string,
+    focusAreas: (t.focus_areas as FocusArea[] | undefined) ?? undefined,
+    expectedSolution: (t.expected_solution as string | undefined) ?? undefined,
+  }
+}
+
 export function listTasks(siteId: string) {
-  return request<Task[]>(`/v1/sites/${siteId}/tasks`)
+  return request<Record<string, unknown>[]>(`/v1/sites/${siteId}/tasks`)
+    .then(items => items.map(normalizeTask))
 }
 
-export function createTask(siteId: string, title: string, description?: string) {
-  return request<Task>(`/v1/sites/${siteId}/tasks`, {
+export function createTask(
+  siteId: string,
+  title: string,
+  description?: string,
+  focusAreas?: FocusArea[],
+  expectedSolution?: string,
+) {
+  return request<Record<string, unknown>>(`/v1/sites/${siteId}/tasks`, {
     method: 'POST',
-    body: JSON.stringify({ title, description: description ?? null }),
-  })
+    body: JSON.stringify({
+      title,
+      description: description ?? null,
+      focus_areas: focusAreas ?? null,
+      expected_solution: expectedSolution ?? null,
+    }),
+  }).then(normalizeTask)
 }
 
-export function updateTask(taskId: number, title: string, description?: string) {
-  return request<Task>(`/v1/tasks/${taskId}`, {
+export function updateTask(
+  taskId: number,
+  title: string,
+  description?: string,
+  focusAreas?: FocusArea[],
+  expectedSolution?: string,
+) {
+  return request<Record<string, unknown>>(`/v1/tasks/${taskId}`, {
     method: 'PUT',
-    body: JSON.stringify({ title, description: description ?? null }),
-  })
+    body: JSON.stringify({
+      title,
+      description: description ?? null,
+      focus_areas: focusAreas ?? null,
+      expected_solution: expectedSolution ?? null,
+    }),
+  }).then(normalizeTask)
 }
 
 export function deleteTask(taskId: number) {
@@ -131,6 +176,13 @@ export function listEvents(sessionId: string, limit = 500) {
 
 // ─── Journeys ────────────────────────────────────────────────────────────────
 
+export interface SolutionEval {
+  result: 'correct' | 'partially_correct' | 'false_or_misleading'
+  reason: string
+  expected_solution?: string
+  agent_answer?: string
+}
+
 export interface JourneyResponse {
   id: number
   site_id: string
@@ -144,6 +196,7 @@ export interface JourneyResponse {
   source: string
   is_agent: boolean | null
   embedding: number[] | null
+  solution_eval?: SolutionEval | null
   completed_at: string
   updated_at: string
 }
@@ -155,7 +208,7 @@ export interface ProjectWithJourneys {
   label: string | null
   target_url: string
   created_at: string
-  tasks: { id: number; title: string; description: string | null; order_index: number }[]
+  tasks: { id: number; title: string; description: string | null; order_index: number; focus_areas?: string[] | null; expected_solution?: string | null }[]
   journeys: JourneyResponse[]
 }
 
@@ -180,8 +233,13 @@ export function saveJourney(
   })
 }
 
-export function listSiteJourneys(siteId: string, source?: string) {
-  const qs = source ? `?source=${encodeURIComponent(source)}` : ''
+export function listSiteJourneys(siteId: string, source?: string, taskId?: number) {
+  const params = new URLSearchParams()
+  if (source) params.set('source', source)
+  if (taskId != null) params.set('task_id', String(taskId))
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  debug(`Requesting journeys for siteId=${siteId}, source=${source}, taskId=${taskId}`)
+  debug(`params printed:`, params.toString())
   return request<JourneyResponse[]>(`/v1/sites/${siteId}/journeys${qs}`)
 }
 
@@ -230,13 +288,27 @@ export function getSiteSimilarity(siteId: string, taskId?: number) {
   return request<JourneySimilarityItem[]>(`/v1/sites/${siteId}/similarity${qs}`)
 }
 
+export interface CompareHighlight {
+  sections?: Array<'stats' | 'action_breakdown' | 'action_mix' | 'steps_per_page' | 'page_revisits' | 'session_variance' | 'time_per_action'>
+  side?: 'ai' | 'human' | 'both'
+  metrics?: Array<'median_steps' | 'unique_pages' | 'click_rate' | 'scroll_rate' | 'avg_duration' | 'total_steps' | 'avg_steps' | 'shared_pages'>
+  action_types?: Array<'click_element' | 'input_text' | 'scroll' | 'navigate' | 'extract_content' | 'other'>
+  pages?: string[]
+  /** When 'divergence', the Journey Flow diagram emphasises the milestone nodes
+   *  where AI and human (or different runs) took divergent paths. */
+  focus?: 'divergence'
+}
+
 export interface DiagramRef {
-  view: 'compare' | 'sankey' | 'heatmap' | 'multiflow' | 'similarity' | 'comparative' | 'insights' | 'policy' | 'human_agg'
+  view: 'compare' | 'sankey' | 'heatmap' | 'multiflow' | 'similarity' | 'comparative' | 'insights' | 'policy' | 'human_agg' | 'horizon'
   reason: string
+  highlight?: CompareHighlight
+  diagram_explanation?: string
 }
 
 export interface ActionPointItem {
   text: string
+  suggested_action?: string
   agent_explanation?: string
   human_explanation?: string
   agent_bullets?: string[]
@@ -273,11 +345,22 @@ export function getStoredAnalysis(siteId: string, versionId: string) {
   )
 }
 
-export function runComparativeAnalysis(siteId: string, taskIds?: number[], versionId = 'v1') {
-  return request<ComparativeAnalysis>(`/v1/sites/${siteId}/comparative-analysis`, {
+export async function runComparativeAnalysis(siteId: string, taskIds?: number[], versionId = 'v1'): Promise<ComparativeAnalysis> {
+  // POST starts the analysis in the background (returns 202 immediately)
+  await request<{ status: string }>(`/v1/sites/${siteId}/comparative-analysis`, {
     method: 'POST',
     body: JSON.stringify({ task_ids: taskIds ?? null, version_id: versionId }),
   })
+  // Poll GET until the result is saved
+  const deadline = Date.now() + 10 * 60 * 1000 // 10 min max
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 4000))
+    try {
+      const result = await getStoredAnalysis(siteId, versionId)
+      if (result) return result
+    } catch { /* not ready yet */ }
+  }
+  throw new Error('Analysis timed out after 10 minutes')
 }
 
 // ─── Explain AI ───────────────────────────────────────────────────────────────
@@ -339,14 +422,28 @@ export function explainHuman(
   })
 }
 
+export interface AnnotationPoint {
+  x: number; y: number; label: string; glyph?: string
+}
+
 export interface AnnotateResult {
-  x: number; y: number; width: number; height: number; found: boolean
+  found: boolean
+  points: AnnotationPoint[]
+  // legacy
+  x: number; y: number; width: number; height: number
 }
 
 export function annotateScreenshot(screenshotId: number, issueText: string) {
   return request<AnnotateResult>('/v1/annotate-screenshot', {
     method: 'POST',
     body: JSON.stringify({ screenshot_id: screenshotId, issue_text: issueText }),
+  })
+}
+
+export function selectScreenshot(screenshotIds: number[], issueText: string) {
+  return request<{ screenshot_id: number | null }>('/v1/select-screenshot', {
+    method: 'POST',
+    body: JSON.stringify({ screenshot_ids: screenshotIds, issue_text: issueText }),
   })
 }
 

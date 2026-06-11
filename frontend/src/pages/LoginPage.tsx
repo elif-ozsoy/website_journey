@@ -1,10 +1,11 @@
+import { storageKeys } from '../lib/storage'
 import { useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as api from '../lib/api'
 import HowItWorksDiagram from '../components/HowItWorksDiagram'
 import '../index.css' 
 
-export const USER_STORAGE_KEY = 'ciphercorgi_user'
+export const USER_STORAGE_KEY = storageKeys.user
 
 export interface AppUser { name: string; email: string; id: string }
 
@@ -17,7 +18,7 @@ export function getUser(): AppUser | null {
 export function saveUser(u: AppUser) { localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u)) }
 export function clearUser() {
   localStorage.removeItem(USER_STORAGE_KEY)
-  localStorage.removeItem('ciphercorgi_token')
+  localStorage.removeItem(storageKeys.token)
 }
 
 export default function LoginPage() {
@@ -35,7 +36,7 @@ export default function LoginPage() {
     setError('')
     try {
       const resp = await api.identify(name.trim(), email.trim())
-      localStorage.setItem('ciphercorgi_token', resp.access_token)
+      localStorage.setItem(storageKeys.token, resp.access_token)
       saveUser({ name: name.trim(), email: email.trim(), id: resp.user.id })
       navigate('/home')
     } catch {

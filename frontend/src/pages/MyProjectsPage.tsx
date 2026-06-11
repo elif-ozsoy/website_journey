@@ -4,7 +4,7 @@ import type { Project } from '../lib/types'
 import { PROJECTS_STORAGE_KEY } from '../lib/types'
 import ProjectCard from '../components/projects/ProjectCard'
 import * as api from '../lib/api'
-import { getUser, clearUser } from './LoginPage'
+import { getUser } from './LoginPage'
 
 export default function MyProjectsPage() {
   const navigate = useNavigate()
@@ -35,10 +35,6 @@ export default function MyProjectsPage() {
     setDeleting(false)
   }
 
-  function handleLogout() {
-    clearUser()
-    navigate('/')
-  }
 
   useEffect(() => {
     if (!user?.id) return
@@ -62,6 +58,9 @@ export default function MyProjectsPage() {
       const stored = localStorage.getItem(PROJECTS_STORAGE_KEY)
       if (stored) setProjects(JSON.parse(stored))
     })
+ 
+  // Runs once on mount by design (user identity is stable per session).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const projectToDelete = projects.find(p => p.siteId === confirmDeleteId)

@@ -52,7 +52,7 @@ def create_tester_link(
         user_id = current_user.id if current_user else None
         return svc.generate_tester_link(db, str(body.url), body.label, user_id=user_id)
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
 
 @router.get("/tester-link", response_model=TesterLinkResponse)

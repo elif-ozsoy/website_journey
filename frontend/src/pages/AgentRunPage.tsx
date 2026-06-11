@@ -1,10 +1,12 @@
+import { debugWarn } from '../lib/debug'
+import { storageKeys } from '../lib/storage'
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useProjectContext } from '../context/ProjectContext'
 import * as api from '../lib/api'
 import InputForm from '../components/agent/InputForm'
 import StatusBar from '../components/agent/StatusBar'
-import type { AgentStep, RunConfig, WsMessage } from '../components/agent/agentTypes'
+import type { AgentStep, RunConfig, WsMessage, SolutionEval } from '../components/agent/agentTypes'
 import { getStepsFromSessionEvents } from '../components/dashboard/screenshotData'
 
 import SankeyDiagram from '../components/agent/SankeyDiagram'
@@ -15,7 +17,7 @@ type AppState = 'idle' | 'running' | 'complete' | 'error'
 
 function JourneyVisualization({ steps, humanJourneys, isComplete }: { steps: AgentStep[]; humanJourneys: AgentStep[][]; isComplete: boolean }) {
   const [tab, setTab] = useState<'flowmap' | 'sankey' | 'compare' | 'timeline'>('flowmap')
-  const [selected, setSelected] = useState<number | null>(null)
+  const [, setSelected] = useState<number | null>(null)
   const TABS = [
     { id: 'flowmap', label: 'Flow Map' },
     { id: 'sankey', label: 'Journey Flow' },
@@ -58,6 +60,7 @@ export default function AgentRunPage() {
   const [steps, setSteps] = useState<AgentStep[]>([])
   const [humanJourneys, setHumanJourneys] = useState<AgentStep[][]>([])
   const [errorMessage, setErrorMessage] = useState('')
+  const [solutionEval, setSolutionEval] = useState<SolutionEval | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const isRunningRef = useRef(false)
 
@@ -65,11 +68,10 @@ export default function AgentRunPage() {
     if (appState !== 'idle' || steps.length > 0 || !siteId) return
 
     async function load() {
-      const storageKey = `ciphercorgi_agent_run_${siteId}`
       let loaded: AgentStep[] | null = null
       let journeyId: number | null = null
 
-      const stored = localStorage.getItem(storageKey!)
+      const stored = localStorage.getItem(storageKeys.agentRun(siteId!))
       if (stored) {
         try {
           const parsed = JSON.parse(stored) as { steps?: AgentStep[] }
@@ -119,7 +121,6 @@ export default function AgentRunPage() {
       .catch(() => {})
   }, [siteId, sessions, siteUrl])
 
-  const agentUrl = import.meta.env.VITE_BACKEND_URL ?? import.meta.env.VITE_AGENT_URL ?? window.location.origin
 
   function handleRun(config: RunConfig) {
     wsRef.current?.close()
@@ -127,15 +128,15 @@ export default function AgentRunPage() {
     setAppState('running')
     setSteps([])
     setErrorMessage('')
+    setSolutionEval(null)
     setStatusMessage('Connecting…')
 
-    const wsProtocol = agentUrl.startsWith('https') ? 'wss:' : 'ws:'
-    const wsHost = agentUrl.replace(/^https?:\/\//, '')
-    const ws = new WebSocket(`${wsProtocol}//${wsHost}/ws/run`)
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws/run`)
     wsRef.current = ws
 
     ws.onopen = () => {
-      const userToken = localStorage.getItem('ciphercorgi_token')
+      const userToken = localStorage.getItem(storageKeys.token)
       ws.send(JSON.stringify({ ...config, site_id: siteId ?? null, user_token: userToken ?? null }))
       setStatusMessage('Connected — starting agent…')
     }
@@ -145,12 +146,14 @@ export default function AgentRunPage() {
       else if (msg.type === 'step') { setSteps((prev) => [...prev, msg.data]); setStatusMessage(`Step ${msg.data.step_number} — ${msg.data.action_type}`) }
       else if (msg.type === 'complete') {
           isRunningRef.current = false; setAppState('complete'); setStatusMessage(`Done — ${msg.data.total_steps} steps recorded`)
-          try { localStorage.setItem(`ciphercorgi_agent_run_${siteId}`, JSON.stringify({ siteId, steps: msg.data.steps, completedAt: Date.now() })) } catch { /* ignore */ }
+          if (msg.data.solution_eval) setSolutionEval(msg.data.solution_eval)
           if (siteId) {
+            try { localStorage.setItem(storageKeys.agentRun(siteId), JSON.stringify({ siteId, steps: msg.data.steps, completedAt: Date.now() })) } catch { /* ignore */ }
             api.saveJourney(siteId, config.task, msg.data.steps).catch(() => {/* non-fatal */})
           }
         }
       else if (msg.type === 'error') { isRunningRef.current = false; setAppState('error'); setErrorMessage(msg.message); setStatusMessage('Agent encountered an error') }
+      else if (msg.type === 'warning') { debugWarn('[CipherCorgi] Agent run warning:', msg.message) }
     }
     ws.onerror = () => { isRunningRef.current = false; setAppState('error'); setErrorMessage('WebSocket connection failed. Is the agent backend running?') }
     ws.onclose = () => { if (isRunningRef.current) { isRunningRef.current = false; setAppState('error'); setErrorMessage('Connection closed unexpectedly.') } }
@@ -196,11 +199,38 @@ export default function AgentRunPage() {
                 <div style={{ height: '100%', overflowY: 'auto' }}>
                   <JourneyVisualization steps={steps} humanJourneys={humanJourneys} isComplete={appState === 'complete'} />
                   {appState === 'complete' && (
-                    <div style={{ padding: '32px 0', display: 'flex', justifyContent: 'center' }}>
+                    <div style={{ padding: '32px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: '#fff', border: '1px solid var(--gray200)', borderRadius: 999 }}>
                         <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--brand)', display: 'inline-block' }} />
                         <span style={{ fontWeight: 700 }}>Journey Finalized</span>
                       </div>
+                      {solutionEval && (
+                        <div style={{
+                          display: 'flex', flexDirection: 'column', gap: 4,
+                          padding: '10px 18px', borderRadius: 10, maxWidth: 480,
+                          background: solutionEval.result === 'correct' ? '#dcfce7'
+                                    : solutionEval.result === 'partially_correct' ? '#fef3c7'
+                                    : '#fee2e2',
+                          border: '1px solid',
+                          borderColor: solutionEval.result === 'correct' ? '#16a34a'
+                                     : solutionEval.result === 'partially_correct' ? '#d97706'
+                                     : '#dc2626',
+                        }}>
+                          <div style={{
+                            fontWeight: 700, fontSize: 'var(--fs-body)',
+                            color: solutionEval.result === 'correct' ? '#15803d'
+                                 : solutionEval.result === 'partially_correct' ? '#b45309'
+                                 : '#b91c1c',
+                          }}>
+                            {solutionEval.result === 'correct' ? '✓ Correct'
+                             : solutionEval.result === 'partially_correct' ? '◑ Partially Correct'
+                             : '✗ False / Misleading'}
+                          </div>
+                          <div style={{ fontSize: 'var(--fs-small)', color: 'var(--gray700)', lineHeight: 1.5 }}>
+                            {solutionEval.reason}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -177,7 +177,7 @@ _FINISHED_HTML = """\
   .outcome-row label:hover{{background:#F7F9FC;}}
   .outcome-row input[type="radio"]:checked + span{{font-weight:700;}}
   .outcome-row label:has(input[value="success"]:checked){{
-    border-color:#0D7A5F;color:#0D7A5F;background:#EDF8F2;
+    border-color:#185FA5;color:#185FA5;background:#EBF3FC;
   }}
   .outcome-row label:has(input[value="failed"]:checked){{
     border-color:#C73E1D;color:#C73E1D;background:#FCE9E3;
@@ -418,9 +418,14 @@ def finished_page(site_id: str = "", session_id: str = "", db: Session = Depends
     tasks_for_ui = []
     if configured_tasks:
         for i, t in enumerate(configured_tasks):
-            tid = str(t.get("id") or "")
+            raw_id = t.get("id")
+            tid = str(raw_id) if raw_id is not None else ""
             title = t.get("title") or f"Task {i + 1}"
-            attempted = (tid and tid in attempted_ids) or (title in attempted_ids)
+            attempted = (
+                (tid and tid in attempted_ids)
+                or (raw_id is not None and str(int(raw_id)) in attempted_ids if isinstance(raw_id, (int, float)) else False)
+                or (title in attempted_ids)
+            )
             tasks_for_ui.append({
                 "task_id": tid or None,
                 "task_title": title,

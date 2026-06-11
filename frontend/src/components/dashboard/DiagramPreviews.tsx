@@ -56,16 +56,16 @@ export function ComparePreview() {
     <svg viewBox="0 0 80 50" fill="none" xmlns="http://www.w3.org/2000/svg">
       <rect x="4" y="4" width="34" height="42" rx="3" fill="#0f172a" stroke="#1e293b"/>
       <rect x="42" y="4" width="34" height="42" rx="3" fill="#0f172a" stroke="#1e293b"/>
-      <text x="21" y="13" textAnchor="middle" fontSize="5" fill="#185FA5" fontWeight="700">AI</text>
-      <text x="59" y="13" textAnchor="middle" fontSize="5" fill="#0d9488" fontWeight="700">Human</text>
+      <text x="21" y="13" textAnchor="middle" fontSize="5" fill="#32494B" fontWeight="700">AI</text>
+      <text x="59" y="13" textAnchor="middle" fontSize="5" fill="#881342" fontWeight="700">Human</text>
       <rect x="8" y="18" width="22" height="4" rx="1" fill="#334155"/>
       <rect x="8" y="24" width="14" height="4" rx="1" fill="#334155"/>
       <rect x="8" y="30" width="18" height="4" rx="1" fill="#334155"/>
-      <rect x="8" y="36" width="10" height="4" rx="1" fill="#185FA5" fillOpacity="0.5"/>
+      <rect x="8" y="36" width="10" height="4" rx="1" fill="#32494B" fillOpacity="0.5"/>
       <rect x="46" y="18" width="16" height="4" rx="1" fill="#334155"/>
       <rect x="46" y="24" width="22" height="4" rx="1" fill="#334155"/>
       <rect x="46" y="30" width="12" height="4" rx="1" fill="#334155"/>
-      <rect x="46" y="36" width="20" height="4" rx="1" fill="#0d9488" fillOpacity="0.5"/>
+      <rect x="46" y="36" width="20" height="4" rx="1" fill="#881342" fillOpacity="0.5"/>
     </svg>
   )
 }
@@ -102,14 +102,14 @@ export function MultiFlowPreview() {
               <circle
                 cx={4 + ni * 14 + 5} cy={8 + li * 8 + 4} r="3.5"
                 fill={li === 2 && ni === 3 ? '#ef4444' : '#1e293b'}
-                stroke={li < 2 ? '#185FA5' : '#0d9488'}
+                stroke={li < 2 ? '#32494B' : '#881342'}
                 strokeWidth="1"
               />
               {ni < 4 && (
                 <line
                   x1={4 + ni * 14 + 8.5} y1={8 + li * 8 + 4}
                   x2={4 + ni * 14 + 18} y2={8 + li * 8 + 4}
-                  stroke={li < 2 ? '#185FA555' : '#0d948855'}
+                  stroke={li < 2 ? '#32494B55' : '#88134255'}
                   strokeWidth="1"
                 />
               )}
@@ -201,17 +201,17 @@ export function PolicyBotPreview() {
         </g>
       ))}
       {/* human policy badge on node 2 */}
-      <rect x="31" y="9" width="20" height="5" rx="1.5" fill="#0d9488" fillOpacity="0.25" stroke="#0d9488" strokeWidth="0.8"/>
-      <text x="41" y="13" textAnchor="middle" fontSize="3.5" fill="#0d9488" fontWeight="700">policy</text>
-      <line x1="41" y1="14" x2="36" y2="16" stroke="#0d9488" strokeWidth="0.8" strokeOpacity="0.6"/>
+      <rect x="31" y="9" width="20" height="5" rx="1.5" fill="#881342" fillOpacity="0.25" stroke="#881342" strokeWidth="0.8"/>
+      <text x="41" y="13" textAnchor="middle" fontSize="3.5" fill="#881342" fontWeight="700">policy</text>
+      <line x1="41" y1="14" x2="36" y2="16" stroke="#881342" strokeWidth="0.8" strokeOpacity="0.6"/>
       {/* thought bubble on node 2 */}
       <rect x="28" y="29" width="24" height="9" rx="2" fill="#1e293b" stroke="#334155"/>
       <text x="40" y="35" textAnchor="middle" fontSize="3.2" fill="#94a3b8">follows human</text>
       <line x1="40" y1="29" x2="38" y2="26" stroke="#334155" strokeWidth="0.8"/>
       {/* AI label */}
-      <text x="6" y="45" fontSize="3.8" fill="#185FA5" fontWeight="700">AI</text>
+      <text x="6" y="45" fontSize="3.8" fill="#32494B" fontWeight="700">AI</text>
       <text x="13" y="45" fontSize="3.8" fill="#475569">guided by</text>
-      <text x="34" y="45" fontSize="3.8" fill="#0d9488" fontWeight="700">human policy</text>
+      <text x="34" y="45" fontSize="3.8" fill="#881342" fontWeight="700">human policy</text>
     </svg>
   )
 }

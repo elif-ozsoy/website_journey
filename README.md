@@ -20,6 +20,8 @@ docker compose up backend postgres
 The backend will be available at `http://localhost:8080`.  
 Hot-reload is enabled — changes to `backend/src/` are reflected immediately.
 
+> **CLIP model cache:** the backend uses a CLIP model (~340 MB) for screenshot pre-selection. Model weights are downloaded automatically on first use and stored in a Docker volume called `model-cache` so they survive container restarts.
+
 ### 2. Start the frontend
 
 In a separate terminal:

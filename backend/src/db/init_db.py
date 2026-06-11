@@ -34,7 +34,33 @@ def init_db() -> None:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE journeys ADD COLUMN embedding TEXT"))
 
+    if "solution_eval" not in journey_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE journeys ADD COLUMN solution_eval TEXT"))
+
+    # Widen task_title from VARCHAR(200) to TEXT if it's still the old narrow type
+    with engine.begin() as conn:
+        conn.execute(text(
+            "ALTER TABLE journeys ALTER COLUMN task_title TYPE TEXT"
+        ))
+
     screenshot_columns = {column["name"] for column in inspector.get_columns("screenshots")}
     if "action_id" not in screenshot_columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE screenshots ADD COLUMN action_id VARCHAR(64)"))
+    if "data" not in screenshot_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE screenshots ADD COLUMN data BYTEA"))
+
+    site_columns = {col["name"] for col in inspector.get_columns("sites")}
+    if "policy_snapshot" not in site_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE sites ADD COLUMN policy_snapshot TEXT"))
+
+    task_columns = {col["name"] for col in inspector.get_columns("tasks")}
+    if "focus_areas" not in task_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN focus_areas TEXT"))
+    if "expected_solution" not in task_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN expected_solution TEXT"))

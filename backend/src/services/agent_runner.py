@@ -6,7 +6,8 @@ import re
 import struct
 import time
 from dataclasses import asdict, dataclass
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from browser_use.llm.openai.chat import ChatOpenAI as _ChatOpenAI
 from browser_use.llm.openai.chat import ChatInvokeCompletion
@@ -101,22 +102,22 @@ def _extract_action_info(actions: list) -> tuple[str, dict]:
 
 def _build_llm(llm_provider: str, api_key: str, model: str | None):
     chat_module = importlib.import_module("browser_use.llm.openai.chat")
-    ChatOpenAI = getattr(chat_module, "ChatOpenAI")
+    ChatOpenAI = chat_module.ChatOpenAI
 
     if llm_provider == "nvidia":
         return ChatOpenAI(
-            model=model or "qwen/qwen3.5-122b-a10b", #"meta/llama-3.2-11b-vision-instruct", "meta/llama-4-maverick-17b-128e-instruct"
+            model=model or "meta/llama-4-maverick-17b-128e-instruct",
             api_key=api_key,
             base_url="https://integrate.api.nvidia.com/v1",
-            timeout=120,
+            timeout=300,
         )
 
     if llm_provider == "google":
         browser_use_mod = importlib.import_module("browser_use")
-        ChatGoogle = getattr(browser_use_mod, "ChatGoogle")
+        ChatGoogle = browser_use_mod.ChatGoogle
 
         return ChatGoogle(
-            model=model or "gemini-3-flash-preview",
+            model=model or "gemini-2.5-flash",
             api_key=api_key,
         )
 
@@ -226,12 +227,11 @@ async def run_browser_agent(
     model: str | None,
     step_callback: Callable,
     status_callback: Callable,
+    extend_system_message: str | None = None,
 ) -> dict:
     try:
         browser_use_mod = importlib.import_module("browser_use")
-        profile_module = importlib.import_module("browser_use.browser.profile")
-        Agent = getattr(browser_use_mod, "Agent")
-        BrowserProfile = getattr(profile_module, "BrowserProfile")
+        Agent = browser_use_mod.Agent
     except ImportError as exc:
         raise ImportError("browser-use is not installed.") from exc
 
@@ -244,8 +244,15 @@ async def run_browser_agent(
     # )
 
     browser = Browser(
+        # cdp_url="ws://127.0.0.1:9222",
         headless=True,
-        args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        args=[
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            # Force light color scheme so websites render with their light-mode styles
+            "--blink-settings=preferredColorScheme=1",
+        ],
         window_size={'width': 1280, 'height': 800},
         device_scale_factor=1.0,
     )
@@ -261,10 +268,11 @@ async def run_browser_agent(
         use_vision=True,
         use_judge=False,
         max_history_items=10,
-        max_failures=3,
-        llm_timeout=120,
+        max_failures=5,
+        llm_timeout=300,
         max_actions_per_step=1,
-        save_conversation_path=save_conversation_path
+        save_conversation_path=save_conversation_path,
+        extend_system_message=extend_system_message,
     )
 
     await status_callback("Agent is running... (this may take a few minutes)")
@@ -272,13 +280,23 @@ async def run_browser_agent(
     steps: list[dict] = []
     history_items = []
 
+    run_start = time.time()
     try:
         history = await agent.run(max_steps=50)
         await status_callback("Processing results...")
         history_items = history.history if hasattr(history, "history") else list(history)
     except Exception as e:
         await status_callback(f"Agent stopped early: {e}")
+    finally:
+        try:
+            await browser.close()
+        except Exception:
+            pass
+    run_end = time.time()
 
+    n_items = sum(1 for item in history_items if hasattr(item, "model_output") and item.model_output is not None)
+
+    _step_idx = 0
     for item in history_items:
         if not hasattr(item, "model_output") or item.model_output is None:
             continue
@@ -337,6 +355,12 @@ async def run_browser_agent(
                 action_details = {**action_details, "text": str(element_text).strip()[:200]}
     
 
+        # Distribute timestamps evenly across the actual wall-clock run duration
+        # so per-step and total-time metrics are meaningful in the dashboard.
+        frac = _step_idx / max(n_items - 1, 1) if n_items > 1 else 0.5
+        step_ts = run_start + frac * (run_end - run_start)
+        _step_idx += 1
+
         step = AgentStepData(
             step_number=len(steps) + 1,
             url=getattr(item.state, "url", "") or "",
@@ -344,11 +368,11 @@ async def run_browser_agent(
             action_type=action_type,
             action_details=action_details,
             reasoning=getattr(brain, "evaluation_previous_goal", "") or "",
-            thought=getattr(brain, "thought", "") or "",
+            thought=getattr(brain, "thinking", "") or "",
             next_goal=getattr(brain, "next_goal", "") or "",
             screenshot_base64=screenshot_b64,
             element_coordinates=coords,
-            timestamp=time.time(),
+            timestamp=step_ts,
         )
 
         step_dict = asdict(step)

@@ -10,16 +10,16 @@ import { ANTHROPIC_KEY_STORAGE } from '../../lib/api'
 // ─── API Key Modal ─────────────────────────────────────────────────────────────
 
 function ApiKeyModal({ onClose }: { onClose: () => void }) {
-  const { apiKey, setApiKey, provider, setProvider } = useAgentRun()
-  const [draft, setDraft] = useState(apiKey)
-  const [draftProvider, setDraftProvider] = useState(provider)
+  const { apiKey, setApiKey, googleApiKey, setGoogleApiKey } = useAgentRun()
+  const [draftNvidia, setDraftNvidia] = useState(apiKey)
+  const [draftGoogle, setDraftGoogle] = useState(googleApiKey)
   const [draftAnthropicKey, setDraftAnthropicKey] = useState(
     () => localStorage.getItem(ANTHROPIC_KEY_STORAGE) ?? ''
   )
 
   function handleSave() {
-    setApiKey(draft)
-    setProvider(draftProvider as 'nvidia' | 'google')
+    setApiKey(draftNvidia)
+    setGoogleApiKey(draftGoogle)
     if (draftAnthropicKey.trim()) {
       localStorage.setItem(ANTHROPIC_KEY_STORAGE, draftAnthropicKey.trim())
     } else {
@@ -37,26 +37,30 @@ function ApiKeyModal({ onClose }: { onClose: () => void }) {
         </div>
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
-            <label style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--gray700)', display: 'block', marginBottom: 6 }}>Agent Provider</label>
-            <select value={draftProvider} onChange={e => setDraftProvider(e.target.value as 'nvidia' | 'google')} className="input" style={{ width: '100%' }}>
-              <option value="nvidia">NVIDIA (free)</option>
-              <option value="google">Google Gemini</option>
-            </select>
-            <p style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', marginTop: 5 }}>
-              {draftProvider === 'nvidia' ? 'Get a free key at build.nvidia.com → sign up → API Keys.' : 'Get a key at aistudio.google.com → Get API key.'}
-            </p>
-          </div>
-          <div>
-            <label style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--gray700)', display: 'block', marginBottom: 6 }}>Agent API Key</label>
+            <label style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--gray700)', display: 'block', marginBottom: 6 }}>Google Gemini API Key</label>
             <input
               type="password"
-              placeholder={draftProvider === 'nvidia' ? 'nvapi-…' : 'AIza…'}
-              value={draft}
-              onChange={e => setDraft(e.target.value)}
+              placeholder="AIza…"
+              value={draftGoogle}
+              onChange={e => setDraftGoogle(e.target.value)}
               className="input"
               style={{ fontFamily: 'var(--font-sans)', width: '100%' }}
               autoComplete="off"
             />
+            <p style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', marginTop: 5 }}>Get a free key at aistudio.google.com → Get API key.</p>
+          </div>
+          <div>
+            <label style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--gray700)', display: 'block', marginBottom: 6 }}>NVIDIA NIM API Key</label>
+            <input
+              type="password"
+              placeholder="nvapi-…"
+              value={draftNvidia}
+              onChange={e => setDraftNvidia(e.target.value)}
+              className="input"
+              style={{ fontFamily: 'var(--font-sans)', width: '100%' }}
+              autoComplete="off"
+            />
+            <p style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', marginTop: 5 }}>Get a free key at build.nvidia.com → API Keys.</p>
           </div>
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
             <label style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--gray700)', display: 'block', marginBottom: 6 }}>Anthropic API Key</label>
@@ -69,7 +73,7 @@ function ApiKeyModal({ onClose }: { onClose: () => void }) {
               style={{ fontFamily: 'var(--font-sans)', width: '100%' }}
               autoComplete="off"
             />
-            <p style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', marginTop: 5 }}>Used for comparative analysis and action point explanations. Saved locally in your browser only.</p>
+            <p style={{ fontSize: 'var(--fs-small)', color: 'var(--gray400)', marginTop: 5 }}>Used for comparative analysis. Saved locally in your browser only.</p>
           </div>
         </div>
         <div style={{ padding: '0 28px 24px', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>

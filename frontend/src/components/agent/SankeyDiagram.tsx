@@ -1,30 +1,17 @@
+import { debugWarn } from '../../lib/debug'
 import { useRef, useEffect, useMemo } from 'react'
 import * as d3 from 'd3'
 import { sankey as d3Sankey, sankeyLinkHorizontal } from 'd3-sankey'
 import type { AgentStep } from './agentTypes'
+import { AGENT_COLOR, HUMAN_COLOR, SANKEY_MARGIN, pageLabel } from '../../lib/sankeyShared'
 
 interface Props {
   agentJourneys: AgentStep[][]
   humanJourneys?: AgentStep[][]
 }
 
-const AGENT_COLOR  = '#185FA5'
-const HUMAN_COLOR  = '#0d9488'
 const BOTH_COLOR   = '#1e293b'
-const MARGIN = { top: 28, right: 200, bottom: 20, left: 20 }
-
-function pageLabel(url: string): string {
-  try {
-    const u = new URL(url)
-    const path = u.pathname.replace(/\/$/, '') || '/'
-    const pageId = u.searchParams.get('page_id')
-    const suffix = pageId ? `?pid=${pageId}` : ''
-    const full = (path === '/' ? '/' : path) + suffix
-    return full.length > 36 ? '…' + full.slice(-34) : full
-  } catch {
-    return url.slice(0, 36)
-  }
-}
+const MARGIN = SANKEY_MARGIN
 
 // ─── Loop detection ───────────────────────────────────────────────────────────
 
@@ -205,7 +192,7 @@ export default function SankeyDiagram({ agentJourneys, humanJourneys = [] }: Pro
     let graph: any
     try {
       graph = layout({ nodes: nodes.map(n => ({ ...n })), links: rawLinks.map(l => ({ ...l })) })
-    } catch (e) { console.warn('Sankey layout error', e); return }
+    } catch (e) { debugWarn('Sankey layout error', e); return }
 
     const g = svg.append('g').attr('transform', `translate(${MARGIN.left},${MARGIN.top})`)
 
@@ -245,7 +232,7 @@ export default function SankeyDiagram({ agentJourneys, humanJourneys = [] }: Pro
       })
 
     // Link % labels on significant links
-    graph.links.forEach((link: any, i: number) => {
+    graph.links.forEach((link: any, _i: number) => {
       if (link.width < 6) return   // only label thick enough links
       const pct = totalJourneys > 0 ? Math.round((link.value / totalJourneys) * 100) : 0
       if (pct < 20) return

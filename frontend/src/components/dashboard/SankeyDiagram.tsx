@@ -1,7 +1,13 @@
-import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
+import { debug, debugWarn } from '../../lib/debug'
+import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react'
+import { AGENT_COLOR, HUMAN_COLOR, SANKEY_MARGIN, pagePath, truncate } from '../../lib/sankeyShared'
 import * as d3 from 'd3'
+import { createPortal } from 'react-dom'
 import { sankey as d3Sankey, sankeyLinkHorizontal } from 'd3-sankey'
 import type { AgentStep } from '../agent/agentTypes'
+import type { CompareHighlight } from '../../lib/api'
+import LinkedHorizonStrip, { type ActiveJourney } from './LinkedHorizonStrip'
+import { actionSamples } from './horizonDensity'
 
 /* ────────────────────────────────────────────────────────────────────────────
  *  Props
@@ -12,6 +18,12 @@ interface Props {
   humanJourneys?: AgentStep[][]
   agentLabels?: string[]
   humanLabels?: string[]
+  onDivergencesChange?: (divergences: NodeDivergence[]) => void
+  highlight?: CompareHighlight
+  /* When true, dock a per-journey horizon strip beneath the diagram and switch
+   * the click gesture to "pin" (double-click still opens the detail modal). */
+  linkedMode?: boolean
+  rightControl?: ReactNode
 }
 
 /* ── Color tokens ──
@@ -21,25 +33,23 @@ interface Props {
  * If you really want themed colors, switch these to .style('fill', ...) and
  * use real CSS classes — but hex keeps things simple and reliable.
  */
-const AGENT_COLOR = '#6366f1'   // Indigo base
-const HUMAN_COLOR = '#16a34a'   // Green base
 
 const AGENT_PALETTE = [
-  '#4f46e5',  // Indigo-600
-  '#2563eb',  // Blue-600
-  '#7c3aed',  // Violet-600
-  '#1d4ed8',  // Blue-700
-  '#a855f7',  // Purple-500
-  '#0ea5e9',  // Sky-500
+  '#32494B',
+  '#3d5b5d',
+  '#496e70',
+  '#558183',
+  '#619496',
+  '#6da7a9',
 ]
 
 const HUMAN_PALETTE = [
-  '#10b981',  // Emerald-500
-  '#059669',  // Emerald-600
-  '#14b8a6',  // Teal-500
-  '#0d9488',  // Teal-600
-  '#22c55e',  // Green-500
-  '#047857',  // Emerald-700
+  '#881342',
+  '#9e1852',
+  '#b41e62',
+  '#ca2472',
+  '#e02a82',
+  '#f63092',
 ]
 function colorForJourney(kind: 'agent' | 'human', index: number): string {
   const palette = kind === 'agent' ? AGENT_PALETTE : HUMAN_PALETTE
@@ -51,23 +61,19 @@ const TEXT_LABEL  = '#475569'
 const BORDER      = '#e2e8f0'
 
 const STEP_ACTION_COLORS: Record<string, string> = {
-  click_element:   '#4f46e5',  // indigo — primary interaction (agent palette)
-  input_text:      '#0d9488',  // teal — data entry (human palette)
-  go_to_url:       '#0284c7',  // sky — navigation
-  scroll:          '#64748b',  // slate — passive movement
-  go_back:         '#e11d48',  // rose — backward/undo
-  extract_content: '#7c3aed',  // violet — AI extraction (agent palette)
-  done:            '#16a34a',  // green — success
+  click_element: '#185FA5',
+  input_text:    '#059669',
+  go_to_url:     '#d97706',
+  scroll:        '#0891b2',
+  go_back:       '#f43f5e',
+  extract_content: '#7c3aed',
+  done:          '#16a34a',
 }
 
 const DIM_OPACITY = 0.10
 const NORMAL_OPACITY = 0.75
 const HIGHLIGHT_OPACITY = 0.95
-const MARGIN = { top: 28, right: 200, bottom: 20, left: 20 }
-
-/* ────────────────────────────────────────────────────────────────────────────
- *  Step accessors
- * ────────────────────────────────────────────────────────────────────────── */
+const MARGIN = SANKEY_MARGIN
 
 function stepScreenshot(s: AgentStep): string | null {
   if (s.screenshot_url) return s.screenshot_url
@@ -80,21 +86,6 @@ function stepScreenshot(s: AgentStep): string | null {
  * ────────────────────────────────────────────────────────────────────────── */
 
 /* Short page path for prefixing node labels. */
-function pagePath(url: string): string {
-  try {
-    const u = new URL(url)
-    const path = u.pathname.replace(/\/$/, '') || '/'
-    const pageId = u.searchParams.get('page_id')
-    return path + (pageId ? `?pid=${pageId}` : '')
-  } catch {
-    return url.slice(0, 36)
-  }
-}
-
-function truncate(s: string, n: number): string {
-  if (!s) return ''
-  return s.length > n ? s.slice(0, n - 1) + '…' : s
-}
 
 /* Build a human-readable node label for a step, taking the action into account.
  * Examples:
@@ -262,22 +253,18 @@ const MILESTONE_LABEL: Record<Milestone, string> = {
 }
 
 /* Short codes for the pattern strip. */
-const MILESTONE_CODE: Record<Milestone, string> = {
-  'start': 'START', 'page': 'PAGE', 'nav': 'NAV', 'list-view': 'LIST',
-  'detail-view': 'DETAIL', 'input': 'INPUT', 'scroll': 'SCROLL',
-  'extract': 'EXTRACT',
-  'done': 'DONE', 'failed': 'FAILED', 'incomplete': 'INCOMPLETE',
-  'other': '·',
-}
 
-/* Special colors for terminal milestones only. Intermediate milestones
- * (start, page, nav, scroll, detail-view) are intentionally omitted so
- * nodeColor() picks up the natural agent-indigo / human-green / slate-for-mixed
- * color — keeping node sticks coherent with the ribbon colors. */
+/* Special colors for terminal milestones. Override nodeColor() and pattern-
+ * chip background for these. */
 const TERMINAL_COLORS: Partial<Record<Milestone, string>> = {
-  'done':       '#16a34a',  // green — success
-  'failed':     '#dc2626',  // red — error
-  'incomplete': '#f59e0b',  // amber — partial
+  'done':       '#15803d',   // deep green — readable label, not neon
+  'failed':     '#b91c1c',   // deep red
+  'incomplete': '#475569',
+  'detail-view': '#4c3a6e',
+  'nav':         '#4c3a6e',
+  'scroll':      '#4c3a6e',
+  'start':       '#4c3a6e',
+  'page':        '#4c3a6e',
 }
 
 /* Heuristics — kept simple and explainable. These work well for the
@@ -654,22 +641,22 @@ function canonicalLabel(label: string): string {
   do {
     prev = s
     // Trailing standalone chrome glyphs
-    s = s.replace(/[\s»›→–—|\-]+$/u, '').trim()
+    s = s.replace(/[\s»›→–—|-]+$/u, '').trim()
     // Trailing "  — Foo" / " – Foo" / " | Foo" / " - Foo" style suffixes
     // (separator with surrounding spaces + trailing word)
-    s = s.replace(/\s+[–—|\-]\s+\S.*$/u, '').trim()
+    s = s.replace(/\s+[–—|-]\s+\S.*$/u, '').trim()
   } while (s !== prev && s.length > 0)
   // Collapse internal whitespace runs into a single space.
   s = s.replace(/\s+/g, ' ').toLowerCase()
   return s
 }
 
-interface DivergenceGroup {
+export interface DivergenceGroup {
   label: string                    // representative element text
   visits: Array<NodeDatum['visits'][number]>   // visits in this group
 }
 
-interface NodeDivergence {
+export interface NodeDivergence {
   nodeId: number
   nodeName: string
   milestone: Milestone
@@ -679,7 +666,7 @@ interface NodeDivergence {
 function detectDivergences(graph: Graph, journeyMap: Map<string, JourneyMeta>): NodeDivergence[] {
   const out: NodeDivergence[] = []
 
-  console.log('[divergence] all nodes:', graph.nodes.map(n => ({
+  debug('[divergence] all nodes:', graph.nodes.map(n => ({
   name: n.name,
   visits: n.visits.length,
   perVisit: n.visits.map(v => ({
@@ -795,10 +782,10 @@ function detectDivergences(graph: Graph, journeyMap: Map<string, JourneyMeta>): 
     
     /* debug*/
     if (node.name === "navigation click") {
-      console.log("=== Debugging Navigation Click Node ===");
+      debug("=== Debugging Navigation Click Node ===");
       node.visits.forEach(v => {
         const meta = journeyMap.get(v.journeyId);
-        console.log(`Journey: ${meta?.label}, Clicked Label: "${v.elementLabel}"`);
+        debug(`Journey: ${meta?.label}, Clicked Label: "${v.elementLabel}"`);
       });
     }
 
@@ -822,6 +809,10 @@ export default function SankeyDiagram({
   humanJourneys = [],
   agentLabels,
   humanLabels,
+  onDivergencesChange,
+  highlight,
+  linkedMode = false,
+  rightControl,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -843,74 +834,13 @@ export default function SankeyDiagram({
 
   const journeyMap = useMemo(() => new Map(journeys.map(j => [j.id, j])), [journeys])
 
-  const showOnlyKind = useCallback((kind: 'agent' | 'human') => {
-    setHiddenJourneyIds(() => {
-      const nextHidden = new Set<string>()
-      // Hide anything that DOES NOT match the kind we want to see
-      journeys.forEach(j => {
-        if (j.kind !== kind) {
-          nextHidden.add(j.id)
-        }
-      })
-      return nextHidden
-    })
-  }, [journeys])
-
-  const showAllRuns = useCallback(() => {
-    // Clear out the hidden set entirely to make everything visible
-    setHiddenJourneyIds(new Set())
-  }, [])
-
-  /* Visibility toggles: clicking a legend item adds/removes from this set.
-   * Hidden runs are excluded from graph construction entirely. */
-  const [hiddenJourneyIds, setHiddenJourneyIds] = useState<Set<string>>(new Set())
-  const visibleJourneys = useMemo(
-    () => journeys.filter(j => !hiddenJourneyIds.has(j.id)),
-    [journeys, hiddenJourneyIds],
-  )
+  const visibleJourneys = journeys
 
   const graph = useMemo(() => buildGraph(visibleJourneys), [visibleJourneys])
-
-  /* Per-journey milestone sequences (compressed runs of same milestone).
-   * Used to render the pattern comparison strip above the diagram. */
-  type PatternEntry = { milestone: Milestone; steps: number }
-  const patterns = useMemo<Map<string, PatternEntry[]>>(() => {
-    const m = new Map<string, PatternEntry[]>()
-    for (const j of visibleJourneys) {
-      const kept = j.steps.filter(isMeaningfulStep)
-      if (kept.length === 0) { m.set(j.id, []); continue }
-      const seq: PatternEntry[] = [{ milestone: 'start', steps: 1 }]
-      let prev: Milestone = 'start'
-      for (const s of kept) {
-        const mi = classifyStep(s, prev)
-        const last = seq[seq.length - 1]
-        if (last.milestone === mi) last.steps++
-        else seq.push({ milestone: mi, steps: 1 })
-        prev = mi
-      }
-      // Append terminal milestone if not already present. Use the AI's
-      // step.outcome when available; otherwise default to 'done'.
-      const TERMINALS_PAT: Milestone[] = ['done', 'failed', 'incomplete']
-      if (!TERMINALS_PAT.includes(seq[seq.length - 1].milestone)) {
-        const lastStep = kept[kept.length - 1]
-        // @ts-ignore
-        const outcome: string | undefined = lastStep?.outcome
-        let terminal: Milestone = 'done'
-        if (j.kind === 'agent') {
-          if (outcome === 'failed') terminal = 'failed'
-          else if (outcome === 'incomplete') terminal = 'incomplete'
-        }
-        seq.push({ milestone: terminal, steps: 1 })
-      }
-      m.set(j.id, seq)
-    }
-    return m
-  }, [visibleJourneys])
 
   /* Divergences — nodes where journeys arrived via different elements. */
   const divergences = useMemo(
   () => {
-    console.log('[divergence] MEMO running, journeys:', visibleJourneys.length)
     return detectDivergences(graph, journeyMap)
   },
   [graph, journeyMap],
@@ -919,10 +849,25 @@ export default function SankeyDiagram({
     () => new Set(divergences.map(d => d.nodeId)),
     [divergences],
   )
-  const [showDivergencePanel, setShowDivergencePanel] = useState(false)
+  useEffect(() => {
+    onDivergencesChange?.(divergences)
+  }, [divergences, onDivergencesChange])
 
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [hoverJourneyId, setHoverJourneyId] = useState<string | null>(null)
+
+  /* ── Linked-mode state (horizon strip) ────────────────────────────────────
+   * pinnedJourneyId  — journey kept active after the mouse leaves (click to pin)
+   * cursorX          — mouse x in Sankey inner coords, for the synced cursor
+   * svgW             — current SVG width, so the strip matches it exactly
+   * journeyExtents   — per-journey [xStart, xEnd] pixel span (Sankey inner coords)
+   * journeyMilestones — ordered milestone x-centers for each journey, used by the strip
+   *                     to draw reference lines aligned to the Sankey columns above */
+  const [pinnedJourneyId, setPinnedJourneyId] = useState<string | null>(null)
+  const [cursorX, setCursorX] = useState<number | null>(null)
+  const [svgW, setSvgW] = useState(860)
+  const [journeyExtents, setJourneyExtents] = useState<Map<string, { xStart: number; xEnd: number }>>(new Map())
+  const [journeyMilestones, setJourneyMilestones] = useState<Map<string, Array<{ x: number; label: string }>>>(new Map())
   /* Modal: when set, shows a full step-by-step view of this journey. */
   const [modalJourneyId, setModalJourneyId] = useState<string | null>(null)
 
@@ -961,6 +906,11 @@ export default function SankeyDiagram({
   useEffect(() => {
     const svg = d3.select(svgRef.current!)
     svg.selectAll('*').remove()
+    // Clear tooltip whenever the SVG rebuilds — elements and their mouseleave
+    // handlers are removed by selectAll('*').remove(), so the tooltip state
+    // would otherwise stay stale.
+    setTooltip(null)
+    setHoverJourneyId(null)
     if (!hasData) return
 
     const containerW = containerRef.current?.clientWidth ?? 860
@@ -989,11 +939,43 @@ export default function SankeyDiagram({
         links: graph.links.map(l => ({ ...l })),
       })
     } catch (e) {
-      console.warn('Sankey layout error', e)
+      debugWarn('Sankey layout error', e)
       return
     }
 
     const g = svg.append('g').attr('transform', `translate(${MARGIN.left},${MARGIN.top})`)
+
+    /* ── Linked mode: per-journey horizontal pixel span ────────────────────
+     * For each journey, find the left edge of its first node and the right edge
+     * of its last node. The docked horizon strip uses this span (in the same
+     * inner-coordinate system as `g`) so its time axis aligns with the flow. */
+    if (linkedMode) {
+      const extents = new Map<string, { xStart: number; xEnd: number }>()
+      /* Per-journey: collect (stepIdx, nodeXCenter, nodeName) so we can sort
+       * by visit order and derive ordered milestone positions for the strip. */
+      const milestonesByJourney = new Map<string, Array<{ stepIdx: number; x: number; label: string }>>()
+      for (const n of laidOut.nodes as any[]) {
+        const xCenter = (n.x0 + n.x1) / 2
+        for (const v of (n.visits ?? [])) {
+          const cur = extents.get(v.journeyId)
+          if (!cur) extents.set(v.journeyId, { xStart: n.x0, xEnd: n.x1 })
+          else { cur.xStart = Math.min(cur.xStart, n.x0); cur.xEnd = Math.max(cur.xEnd, n.x1) }
+          const arr = milestonesByJourney.get(v.journeyId) ?? []
+          arr.push({ stepIdx: v.stepIdx, x: xCenter, label: n.name })
+          milestonesByJourney.set(v.journeyId, arr)
+        }
+      }
+      /* Sort each journey's milestones by step order so they appear left→right
+       * in the same order the journey actually progressed. */
+      const milestones = new Map<string, Array<{ x: number; label: string }>>()
+      for (const [jId, pts] of milestonesByJourney) {
+        pts.sort((a, b) => a.stepIdx - b.stepIdx)
+        milestones.set(jId, pts.map(p => ({ x: p.x, label: p.label })))
+      }
+      setJourneyExtents(extents)
+      setJourneyMilestones(milestones)
+      setSvgW(W)
+    }
 
     /* ── Links: one ribbon per journey traversal ──────────────────────── */
     const linkSel = g.append('g')
@@ -1011,19 +993,27 @@ export default function SankeyDiagram({
       .attr('opacity', NORMAL_OPACITY)
       .attr('cursor', 'pointer')
 
+    /* Disambiguate single-click (pin) from double-click (inspect) in linked
+     * mode. Shared across both handlers since they're attached in one effect. */
+    let clickTimer: ReturnType<typeof setTimeout> | null = null
+
     linkSel.on('mousemove', function (event: MouseEvent, d: any) {
       const link = d as LinkDatum
       setHoverJourneyId(link.journeyId)
       const meta = journeyMap.get(link.journeyId)
       const step = meta?.steps[link.stepIdx]
-      const rect = containerRef.current?.getBoundingClientRect()
+      if (linkedMode) {
+        // Mouse x in the same inner coords the strip uses (g is offset by MARGIN.left).
+        const svgRect = svgRef.current?.getBoundingClientRect()
+        setCursorX(event.clientX - (svgRect?.left ?? 0) - MARGIN.left)
+      }
       const fromNode = laidOut.nodes.find((n: any) =>
         n.id === (typeof link.source === 'object' ? (link.source as any).id : link.source))
       const toNode = laidOut.nodes.find((n: any) =>
         n.id === (typeof link.target === 'object' ? (link.target as any).id : link.target))
       setTooltip({
-        x: event.clientX - (rect?.left ?? 0) + 14,
-        y: event.clientY - (rect?.top ?? 0) + 14,
+        x: event.clientX,
+        y: event.clientY,
         kind: 'link',
         fromName: fromNode?.name ?? '',
         toName: toNode?.name ?? '',
@@ -1032,9 +1022,22 @@ export default function SankeyDiagram({
         rawSteps: link.rawSteps,
       })
     })
-    linkSel.on('mouseleave', () => { setHoverJourneyId(null); setTooltip(null) })
+    linkSel.on('mouseleave', () => { setHoverJourneyId(null); setTooltip(null); if (linkedMode) setCursorX(null) })
     linkSel.on('click', (_: MouseEvent, d: any) => {
       const link = d as LinkDatum
+      setTooltip(null)
+      if (!linkedMode) { setModalJourneyId(link.journeyId); return }
+      // Defer pin so a double-click can cancel it and open the detail modal.
+      if (clickTimer) clearTimeout(clickTimer)
+      clickTimer = setTimeout(() => {
+        setPinnedJourneyId(prev => (prev === link.journeyId ? null : link.journeyId))
+        clickTimer = null
+      }, 220)
+    })
+    linkSel.on('dblclick', (_: MouseEvent, d: any) => {
+      if (!linkedMode) return
+      const link = d as LinkDatum
+      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null }
       setTooltip(null)
       setModalJourneyId(link.journeyId)
     })
@@ -1058,10 +1061,9 @@ export default function SankeyDiagram({
       setHoverJourneyId(null)
       const meta = journeyMap.get(last.journeyId)
       const step = meta?.steps[last.stepIdx]
-      const rect = containerRef.current?.getBoundingClientRect()
       setTooltip({
-        x: event.clientX - (rect?.left ?? 0) + 14,
-        y: event.clientY - (rect?.top ?? 0) + 14,
+        x: event.clientX,
+        y: event.clientY,
         kind: 'node',
         nodeName: node.name,
         step,
@@ -1081,7 +1083,7 @@ export default function SankeyDiagram({
       .attr('cx', (d: any) => d.x1 + 4)
       .attr('cy', (d: any) => d.y0 - 2)
       .attr('r', 7)
-      .attr('fill', '#f59e0b')
+      .attr('fill', '#3b82f6')
       .attr('stroke', '#fff')
       .attr('stroke-width', 1.5)
       .attr('pointer-events', 'none')
@@ -1090,12 +1092,12 @@ export default function SankeyDiagram({
       .attr('y', (d: any) => d.y0 - 2)
       .attr('text-anchor', 'middle')
       .attr('dy', '0.36em')
-      .attr('font-size', 9)
-      .attr('font-weight', 800)
+      .attr('font-size', 8)
+      .attr('font-weight', 900)
       .attr('fill', '#fff')
       .attr('font-family', 'Inter, system-ui, sans-serif')
       .attr('pointer-events', 'none')
-      .text('⚡')
+      .text('!')
 
     /* ── Node labels ───────────────────────────────────────────────────── */
     nodeG.append('text')
@@ -1142,42 +1144,115 @@ export default function SankeyDiagram({
         }
         return parts.join(' · ')
       })
-  }, [graph, journeyMap, journeys.length, hasData, nodeColor, divergentNodeIds, resizeTick])
 
-  /* ── Hover-highlight: dim everything except the hovered journey ─────────── */
+    /* Apply highlight-based dimming as part of the initial render so that
+     * resizes (which re-run this effect) always restore the correct state.
+     * The hover effect below temporarily overrides this during mouse interaction. */
+    if (highlight?.focus === 'divergence' && divergentNodeIds.size > 0) {
+      g.selectAll('path').attr('opacity', function (d: any) {
+        const link = d as any
+        const srcId = typeof link.source === 'object' ? link.source.id : null
+        const tgtId = typeof link.target === 'object' ? link.target.id : null
+        const touches = (srcId && divergentNodeIds.has(srcId)) || (tgtId && divergentNodeIds.has(tgtId))
+        return touches ? HIGHLIGHT_OPACITY : DIM_OPACITY
+      })
+      g.selectAll('rect')
+        .attr('opacity', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? 1 : DIM_OPACITY))
+        .attr('stroke', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? '#3b82f6' : 'none'))
+        .attr('stroke-width', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? 3 : 0))
+    } else {
+      const focusKindInit = highlight?.side === 'ai' ? 'agent' : highlight?.side === 'human' ? 'human' : null
+      if (focusKindInit) {
+        g.selectAll('path').attr('opacity', function (d: any) {
+          const meta = journeyMap.get((d as LinkDatum).journeyId)
+          return meta?.kind === focusKindInit ? NORMAL_OPACITY : DIM_OPACITY
+        })
+        g.selectAll('rect').attr('opacity', function (d: any) {
+          const node = d as NodeDatum
+          const hasKind = node.visits?.some(v => journeyMap.get(v.journeyId)?.kind === focusKindInit)
+          return hasKind ? 1 : DIM_OPACITY
+        })
+      }
+    }
+  }, [graph, journeyMap, journeys.length, hasData, nodeColor, divergentNodeIds, resizeTick, highlight, linkedMode])
+
+  /* ── Hover / highlight: dim non-relevant journeys ───────────────────────── */
 
   useEffect(() => {
     const svg = d3.select(svgRef.current!)
-    if (!hoverJourneyId) {
-      svg.selectAll('path').attr('opacity', NORMAL_OPACITY)
-      svg.selectAll('rect').attr('opacity', 1)
+
+    // A pinned journey (linked mode) stays highlighted when the mouse leaves.
+    const activeId = hoverJourneyId ?? pinnedJourneyId
+    if (activeId) {
+      svg.selectAll<SVGPathElement, LinkDatum>('path').attr('opacity', function (d: any) {
+        return (d as LinkDatum).journeyId === activeId ? HIGHLIGHT_OPACITY : DIM_OPACITY
+      })
+      svg.selectAll<SVGRectElement, NodeDatum>('rect').attr('opacity', function (d: any) {
+        const node = d as NodeDatum
+        const match = node.visits?.some(v => v.journeyId === activeId)
+        return match ? 1 : DIM_OPACITY
+      })
       return
     }
-    svg.selectAll<SVGPathElement, LinkDatum>('path').attr('opacity', function (d: any) {
-      return (d as LinkDatum).journeyId === hoverJourneyId ? HIGHLIGHT_OPACITY : DIM_OPACITY
-    })
-    svg.selectAll<SVGRectElement, NodeDatum>('rect').attr('opacity', function (d: any) {
-      const node = d as NodeDatum
-      const match = node.visits?.some(v => v.journeyId === hoverJourneyId)
-      return match ? 1 : DIM_OPACITY
-    })
-  }, [hoverJourneyId])
 
-  const onLegendClick = useCallback((id: string) => {
-    setHiddenJourneyIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }, [])
+    // Divergence focus: emphasise the milestone nodes where journeys split,
+    // and the flows passing through them. Works even with one-sided data.
+    if (highlight?.focus === 'divergence' && divergentNodeIds.size > 0) {
+      svg.selectAll<SVGPathElement, LinkDatum>('path').attr('opacity', function (d: any) {
+        const link = d as any
+        const srcId = typeof link.source === 'object' ? link.source.id : null
+        const tgtId = typeof link.target === 'object' ? link.target.id : null
+        const touches = (srcId && divergentNodeIds.has(srcId)) || (tgtId && divergentNodeIds.has(tgtId))
+        return touches ? HIGHLIGHT_OPACITY : DIM_OPACITY
+      })
+      svg.selectAll<SVGRectElement, NodeDatum>('rect')
+        .attr('opacity', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? 1 : DIM_OPACITY))
+        .attr('stroke', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? '#3b82f6' : 'none'))
+        .attr('stroke-width', (d: any) => (divergentNodeIds.has((d as NodeDatum).id) ? 3 : 0))
+      return
+    }
+    // Not in divergence mode — clear any divergence outline.
+    svg.selectAll('rect').attr('stroke', 'none').attr('stroke-width', 0)
 
-  const onLegendHover = useCallback((id: string | null) => {
-    setHoverJourneyId(id)
-  }, [])
+    const focusKind = highlight?.side === 'ai' ? 'agent' : highlight?.side === 'human' ? 'human' : null
 
-  const allHidden = hiddenJourneyIds.size === journeys.length && journeys.length > 0
-  const someHidden = hiddenJourneyIds.size > 0 && !allHidden
+    if (focusKind) {
+      svg.selectAll<SVGPathElement, LinkDatum>('path').attr('opacity', function (d: any) {
+        const meta = journeyMap.get((d as LinkDatum).journeyId)
+        return meta?.kind === focusKind ? NORMAL_OPACITY : DIM_OPACITY
+      })
+      svg.selectAll<SVGRectElement, NodeDatum>('rect').attr('opacity', function (d: any) {
+        const node = d as NodeDatum
+        const hasKind = node.visits?.some(v => journeyMap.get(v.journeyId)?.kind === focusKind)
+        return hasKind ? 1 : DIM_OPACITY
+      })
+      return
+    }
+
+    svg.selectAll('path').attr('opacity', NORMAL_OPACITY)
+    svg.selectAll('rect').attr('opacity', 1)
+  }, [hoverJourneyId, pinnedJourneyId, highlight, journeyMap, hasData, divergentNodeIds])
+
+  /* The journey whose horizon strip is shown: the hovered flow, or the pinned
+   * one when nothing is hovered. */
+  const activeJourney = useMemo<ActiveJourney | null>(() => {
+    if (!linkedMode) return null
+    const id = hoverJourneyId ?? pinnedJourneyId
+    if (!id) return null
+    const meta = journeyMap.get(id)
+    const ext = journeyExtents.get(id)
+    if (!meta || !ext) return null
+    return {
+      journeyId: id,
+      label: meta.label,
+      color: colorForJourney(meta.kind, meta.index),
+      xStart: ext.xStart,
+      xEnd: ext.xEnd,
+      actions: actionSamples(meta.steps),
+      milestones: journeyMilestones.get(id) ?? [],
+      pinned: pinnedJourneyId === id,
+    }
+  }, [linkedMode, hoverJourneyId, pinnedJourneyId, journeyMap, journeyExtents, journeyMilestones])
 
   return (
     <div style={{
@@ -1186,239 +1261,116 @@ export default function SankeyDiagram({
       fontFamily: 'Inter, system-ui, sans-serif',
     }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12, flexShrink: 0, flexWrap: 'wrap', gap: 10 }}>
-        <div>
-          <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>
-            Journey milestones
-          </div>
-          <div style={{ fontSize: '0.72rem', color: TEXT_MUTED, marginTop: 2 }}>
-            {agentJourneys.length} agent · {humanJourneys.length} human · link width = steps spent · hover for detail · click runs in legend to hide
-          </div>
-        </div>
-        {someHidden && (
-          <button
-            onClick={() => setHiddenJourneyIds(new Set())}
-            style={{
-              fontSize: '0.72rem', padding: '4px 10px', borderRadius: 4,
-              border: '1px solid #cbd5e1', background: '#fff', color: TEXT_DARK,
-              cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit',
-            }}
-          >
-            {hiddenJourneyIds.size} hidden · show all
-          </button>
-        )}
-      </div>
-
-      {/* Divergence panel */}
-      {divergences.length > 0 && (
-        <div style={{
-          marginBottom: 12, padding: '10px 12px',
-          border: '1px solid #fbbf24', borderRadius: 6,
-          background: '#fffbeb', flexShrink: 0,
-          maxHeight: 220, overflowY: 'auto',
-        }}>
-          <div
-            onClick={() => setShowDivergencePanel(v => !v)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              cursor: 'pointer', marginBottom: showDivergencePanel ? 8 : 0,
-            }}
-          >
+      <div style={{ marginBottom: 8, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: AGENT_COLOR }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: AGENT_COLOR }} />
+            AI
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-small)', fontWeight: 700, color: HUMAN_COLOR }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: HUMAN_COLOR }} />
+            Human
+          </span>
+          {highlight?.side && highlight.side !== 'both' && (
             <span style={{
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              width: 16, height: 16, borderRadius: '50%', background: '#f59e0b',
-              color: '#fff', fontSize: '0.6rem', fontWeight: 800,
-            }}>⚡</span>
-            <span style={{
-              fontSize: '0.66rem', fontWeight: 700, textTransform: 'uppercase',
-              letterSpacing: '0.06em', color: '#92400e',
+              fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+              background: highlight.side === 'ai' ? `${AGENT_COLOR}18` : `${HUMAN_COLOR}18`,
+              color: highlight.side === 'ai' ? AGENT_COLOR : HUMAN_COLOR,
+              border: `1px solid ${highlight.side === 'ai' ? AGENT_COLOR : HUMAN_COLOR}`,
             }}>
-              {divergences.length} divergence{divergences.length !== 1 ? 's' : ''} detected
+              {highlight.side === 'ai' ? 'AI journeys highlighted' : 'Human journeys highlighted'}
             </span>
-            <span style={{ marginLeft: 'auto', fontSize: '0.65rem', color: '#b45309' }}>
-              {showDivergencePanel ? '▼' : '▶'}
-            </span>
-          </div>
-
-          {showDivergencePanel && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {divergences.map(d => (
-                <div key={d.nodeId} style={{
-                  paddingLeft: 22, borderLeft: '2px solid #fbbf24',
-                }}>
-                  <div style={{
-                    fontSize: '0.72rem', fontWeight: 700, color: '#78350f',
-                    marginBottom: 4,
-                  }}>
-                    At <span style={{ fontFamily: 'monospace' }}>{d.nodeName}</span> · {d.groups.length} ways
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                    {d.groups.map((g, gi) => (
-                      <div key={gi} style={{
-                        fontSize: '0.7rem', color: TEXT_DARK,
-                        display: 'flex', alignItems: 'baseline', gap: 6,
-                      }}>
-                        <span style={{ color: '#b45309', fontWeight: 700, flexShrink: 0 }}>•</span>
-                        <span style={{ fontFamily: 'monospace', fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          "{truncate(g.label, 48)}"
-                        </span>
-                        <span style={{ color: TEXT_MUTED, flexShrink: 0 }}>({g.visits.length})</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
           )}
+          {highlight?.focus === 'divergence' && divergentNodeIds.size > 0 && (
+            <span style={{
+              fontSize: '0.67rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+              background: '#dbeafe', color: '#1d4ed8', border: '1px solid #93c5fd',
+            }}>
+              ! Divergence points highlighted
+            </span>
+          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>{rightControl}</div>
         </div>
-      )}
+      </div>
 
       {/* Body */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', gap: 12 }}>
-        <div ref={containerRef} style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
-          {hasData ? (
-            <svg ref={svgRef} style={{ display: 'block' }} />
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: TEXT_MUTED, gap: 8 }}>
-              <span style={{ fontWeight: 600, color: '#64748b' }}>No navigation data yet</span>
-              <span style={{ textAlign: 'center', maxWidth: 320, fontSize: '0.78rem' }}>
-                Run an agent or record a human session to see the flow diagram.
-              </span>
-            </div>
-          )}
-
-          {tooltip && (
-            <div
-              style={{
-                position: 'absolute',
-                left: tooltip.x, top: tooltip.y,
-                pointerEvents: 'none',
-                background: '#ffffff',
-                border: `1px solid ${BORDER}`,
-                borderRadius: 6,
-                boxShadow: '0 6px 24px rgba(15,23,42,0.18)',
-                padding: 10,
-                maxWidth: 480,
-                minWidth: 320,
-                fontSize: '0.72rem',
-                color: TEXT_DARK,
-                zIndex: 10,
-              }}
-            >
-              <TooltipBody t={tooltip} />
-            </div>
-          )}
-        </div>
-
-        {/* Legend */}
-        <div style={{ width: 180, flexShrink: 0, overflow: 'auto', borderLeft: `1px solid ${BORDER}`, paddingLeft: 10 }}>
-          <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center', 
-          marginBottom: 6 
-        }}>
-          <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748b' }}>
-            Runs ({journeys.length})
+      <div
+        ref={containerRef}
+        style={{ flex: 1, overflow: 'auto', position: 'relative' }}
+        onMouseLeave={() => { setTooltip(null); setHoverJourneyId(null) }}
+      >
+        {hasData ? (
+          <svg ref={svgRef} style={{ display: 'block' }} />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: TEXT_MUTED, gap: 8 }}>
+            <span style={{ fontWeight: 600, color: '#64748b' }}>No navigation data yet</span>
+            <span style={{ textAlign: 'center', maxWidth: 320, fontSize: '0.78rem' }}>
+              Run an agent or record a human session to see the flow diagram.
+            </span>
           </div>
-          <button 
-            onClick={showAllRuns}
-            style={{
-              background: 'none', border: 'none', padding: 0,
-              fontSize: '0.65rem', color: AGENT_COLOR, fontWeight: 600,
-              cursor: 'pointer', textDecoration: 'underline'
-            }}
-          >
-            Reset View
-          </button>
-        </div>
+        )}
 
-        {/* Compact Bulk Filter Buttons */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 8 }}>
-          <button
-            onClick={() => showOnlyKind('agent')}
-            style={{
-              padding: '3px 4px', fontSize: '0.65rem', fontWeight: 600,
-              borderRadius: 4, cursor: 'pointer', textAlign: 'center',
-              border: '1px solid #e2e8f0', background: '#f8fafc', color: AGENT_COLOR,
-              fontFamily: 'inherit'
-            }}
-          >
-            AI Only
-          </button>
-          <button
-            onClick={() => showOnlyKind('human')}
-            style={{
-              padding: '3px 4px', fontSize: '0.65rem', fontWeight: 600,
-              borderRadius: 4, cursor: 'pointer', textAlign: 'center',
-              border: '1px solid #e2e8f0', background: '#f8fafc', color: HUMAN_COLOR,
-              fontFamily: 'inherit'
-            }}
-          >
-            Human Only
-          </button>
-  </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {journeys.map(j => {
-              const hidden = hiddenJourneyIds.has(j.id)
-              const color = colorForJourney(j.kind, j.index)
-              return (
-                <button
-                  key={j.id}
-                  onClick={() => onLegendClick(j.id)}
-                  onMouseEnter={() => onLegendHover(j.id)}
-                  onMouseLeave={() => onLegendHover(null)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px',
-                    borderRadius: 4, border: 'none',
-                    background: 'transparent',
-                    color: hidden ? TEXT_MUTED : color,
-                    fontSize: '0.72rem', fontWeight: 600,
-                    cursor: 'pointer', textAlign: 'left',
-                    fontFamily: 'inherit',
-                    textDecoration: hidden ? 'line-through' : 'none',
-                    opacity: hidden ? 0.55 : 1,
-                  }}
-                  title={hidden ? 'Click to show' : 'Click to hide'}
-                >
-                  <span style={{
-                    width: 10, height: 10, borderRadius: 2,
-                    background: hidden ? 'transparent' : color,
-                    border: hidden ? `1.5px solid ${TEXT_MUTED}` : 'none',
-                    flexShrink: 0,
-                  }} />
-                  <span style={{
-                    flex: 1, overflow: 'hidden', textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}>
-                    {j.label}
-                  </span>
-                  <span style={{ fontSize: '0.65rem', color: TEXT_MUTED, fontWeight: 500 }}>
-                    {j.steps.length}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-          {allHidden && (
-            <div style={{ marginTop: 8, fontSize: '0.7rem', color: TEXT_MUTED, fontStyle: 'italic', padding: '0 6px' }}>
-              All runs hidden. Click one to show it again.
-            </div>
-          )}
-        </div>
       </div>
 
-      {/* Journey detail modal */}
+      {/* Tooltip — portalled to <body> and clamped to the viewport so the
+       *  screenshot card never falls off-screen near the right/bottom edges. */}
+      {tooltip && createPortal((() => {
+        const TT_W = 360
+        const TT_H = 360   // generous estimate incl. screenshot
+        const gap = 16
+        // Prefer right/below the cursor; flip to left/above when near an edge.
+        let left = tooltip.x + gap
+        if (left + TT_W > window.innerWidth - 8) left = tooltip.x - TT_W - gap
+        left = Math.max(8, Math.min(left, window.innerWidth - TT_W - 8))
+        let top = tooltip.y + gap
+        if (top + TT_H > window.innerHeight - 8) top = window.innerHeight - TT_H - 8
+        top = Math.max(8, top)
+        return (
+          <div
+            style={{
+              position: 'fixed',
+              left, top,
+              pointerEvents: 'none',
+              background: '#ffffff',
+              border: `1px solid ${BORDER}`,
+              borderRadius: 6,
+              boxShadow: '0 6px 24px rgba(15,23,42,0.18)',
+              padding: 10,
+              width: TT_W,
+              maxHeight: window.innerHeight - 16,
+              overflow: 'auto',
+              fontSize: '0.72rem',
+              color: TEXT_DARK,
+              zIndex: 1000,
+            }}
+          >
+            <TooltipBody t={tooltip} />
+          </div>
+        )
+      })(), document.body)}
+
+      {/* Docked horizon strip — only in linked mode */}
+      {linkedMode && hasData && (
+        <LinkedHorizonStrip
+          width={svgW}
+          marginLeft={MARGIN.left}
+          active={activeJourney}
+          cursorX={cursorX}
+        />
+      )}
+
+      {/* Journey detail modal — portal escapes overflow:hidden ancestors */}
       {modalJourneyId && (() => {
         const j = journeyMap.get(modalJourneyId)
         if (!j) return null
         const color = colorForJourney(j.kind, j.index)
-        return (
+        return createPortal(
           <JourneyDetailModal
             journey={j}
             color={color}
             onClose={() => setModalJourneyId(null)}
-          />
+          />,
+          document.body,
         )
       })()}
     </div>

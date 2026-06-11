@@ -438,16 +438,14 @@ export default function FlowMap({ steps, containerHeight = "calc(100vh - 182px)"
                 {/* ── Main node card ───────────────────────────────── */}
                 <div
                   style={{ width: NODE_W, height: NODE_H, cursor: "pointer" }}
-                  className={`bg-white rounded-xl border shadow-md hover:shadow-xl transition-all duration-200 group overflow-hidden ${
-                    group.isRetry ? "border-amber-300" : "border-slate-200 hover:border-indigo-300"
-                  }`}
+                  className="bg-white rounded-xl border border-slate-200 hover:border-indigo-300 shadow-md hover:shadow-xl transition-all duration-200 group overflow-hidden"
                   onClick={(e) => {
                     if (wasDragRef.current) return;
                     e.stopPropagation();
                     if (group.isRetry) {
                       setExpandedRetry(prev => {
                         const next = new Set(prev);
-                        next.has(gi) ? next.delete(gi) : next.add(gi);
+                        if (next.has(gi)) next.delete(gi); else next.add(gi);
                         return next;
                       });
                     } else {

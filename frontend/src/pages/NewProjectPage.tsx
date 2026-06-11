@@ -14,7 +14,7 @@ export default function NewProjectPage() {
   const [projectName, setProjectName] = useState('')
   const [websiteUrl, setWebsiteUrl] = useState('')
   const [websiteType, setWebsiteType] = useState('')
-  const [goals, setGoals] = useState('')
+  // const [goals, setGoals] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -35,7 +35,7 @@ export default function NewProjectPage() {
         testerLink: result.tester_link,
         createdAt: new Date().toISOString(),
         websiteType: websiteType || undefined,
-        goals: goals.trim() || undefined,
+        // goals: goals.trim() || undefined,
       }
       const existing: Project[] = JSON.parse(localStorage.getItem(PROJECTS_STORAGE_KEY) ?? '[]')
       localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify([...existing, project]))
@@ -135,6 +135,7 @@ export default function NewProjectPage() {
                   </div>
                 </div>
 
+                {/* Goals & context field removed
                 <div className="np-field">
                   <label className="np-label" htmlFor="np-goals">
                     Goals & context
@@ -151,6 +152,7 @@ export default function NewProjectPage() {
                     Describing your audience and goals helps AI agents act realistically.
                   </div>
                 </div>
+                */}
               </div>
             )}
 

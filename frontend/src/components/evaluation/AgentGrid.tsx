@@ -9,12 +9,10 @@ import AddAgentModal from './AddAgentPanel'
 
 export default function AgentGallery({ activeVersionId }: { activeVersionId?: string }) {
   const { siteId } = useParams<{ siteId: string }>()
-  const { agents, setAgents, tasks, siteUrl } = useProjectContext()
+  const { agents, setAgents, tasks } = useProjectContext()
   const {
-    apiKey,
-    runState, currentTaskIdx, totalTasks, statusMsg, liveStepCount, progress,
+    runState, currentTaskIdx, totalTasks, statusMsg, progress,
     runningSiteId, runningVersionId,
-    startRun, stopRun,
   } = useAgentRun()
 
   const isThisRun = runningSiteId === siteId && (runningVersionId === (activeVersionId ?? null) || runningVersionId === null)
@@ -42,7 +40,6 @@ export default function AgentGallery({ activeVersionId }: { activeVersionId?: st
   }
 
   const selectedCount = agents.filter((a) => a.selected).length
-  const canRun = apiKey.trim().length > 0 && tasks.length > 0 && runState !== 'running'
 
   return (
     <section className="eval-section">
